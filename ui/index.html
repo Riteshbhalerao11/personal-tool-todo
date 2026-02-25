@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>if(new URLSearchParams(location.search).get('persona')==='riya')document.documentElement.setAttribute('data-theme','riya');</script>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Resize handles for frameless window (all sides + corners) -->
+    <div class="resize-handle resize-handle-top" data-resize="top"></div>
+    <div class="resize-handle resize-handle-bottom" data-resize="bottom"></div>
+    <div class="resize-handle resize-handle-left" data-resize="left"></div>
+    <div class="resize-handle resize-handle-right" data-resize="right"></div>
+    <div class="resize-handle resize-handle-top-left" data-resize="top-left"></div>
+    <div class="resize-handle resize-handle-top-right" data-resize="top-right"></div>
+    <div class="resize-handle resize-handle-bottom-left" data-resize="bottom-left"></div>
+    <div class="resize-handle resize-handle-bottom-right" data-resize="bottom-right"></div>
+
+    <div class="sticky-note">
+        <div class="header pywebview-drag-region">
+            <span class="title" id="widget-title">My Todos</span>
+            <div class="header-controls">
+                <button class="honey-pot-toggle" id="honey-toggle" onclick="toggleHoneyPot()" title="Honey Pot">&#x1F36F;</button>
+                <button class="header-icon-btn" id="clear-btn" onclick="clearAllTodos()" title="Clear all">&#x2715;</button>
+                <button class="header-icon-btn" id="refresh-btn" onclick="manualRefresh()" title="Refresh">&#x21BB;</button>
+                <button class="header-icon-btn" id="settings-btn" onclick="toggleSettings()" title="Settings">&#x2699;</button>
+                <button class="minimize-btn" onclick="minimizeWidget()" title="Minimize to tray">_</button>
+            </div>
+        </div>
+
+        <div class="streak-area" id="streak-area">
+            <span id="streak-text">Loading...</span>
+            <span id="greeting-text"></span>
+        </div>
+
+        <div class="quote-area" id="quote-area">
+            <div id="quote-text"></div>
+            <div id="quote-author"></div>
+        </div>
+
+        <div class="todo-area" id="todo-area">
+            <div id="todo-list"></div>
+        </div>
+
+        <div class="add-area" id="add-area">
+            <div class="toolbar" id="formatting-toolbar">
+                <button onmousedown="event.preventDefault(); fmt('bold')" title="Bold (Ctrl+B)"><b>B</b></button>
+                <button onmousedown="event.preventDefault(); fmt('italic')" title="Italic (Ctrl+I)"><i>I</i></button>
+                <button onmousedown="event.preventDefault(); fmt('underline')" title="Underline (Ctrl+U)"><u>U</u></button>
+                <button onmousedown="event.preventDefault(); fmt('strikeThrough')" title="Strikethrough"><s>S</s></button>
+                <button id="emoji-btn" class="emoji-btn" onmousedown="event.preventDefault(); toggleEmojiPicker()" title="Emoji">&#x1F600;</button>
+                <div class="separator"></div>
+                <select onmousedown="event.stopPropagation()" onchange="applyFontSizeToSelection(this.value); this.value='';" title="Font size for selected text">
+                    <option value="" disabled selected>Size</option>
+                    <option value="1">Tiny</option>
+                    <option value="2">Small</option>
+                    <option value="3">Normal</option>
+                    <option value="4">Medium</option>
+                    <option value="5">Large</option>
+                    <option value="6">XL</option>
+                    <option value="7">XXL</option>
+                </select>
+            </div>
+            <div id="emoji-picker" class="emoji-picker">
+                <div class="emoji-tabs" id="emoji-tabs"></div>
+                <div class="emoji-grid" id="emoji-grid"></div>
+            </div>
+            <div class="input-row">
+                <span id="depth-indicator" class="depth-indicator"></span>
+                <div id="new-todo" contenteditable="true" data-placeholder="Write something..."></div>
+                <button id="add-btn" onclick="handleAdd()">+</button>
+            </div>
+        </div>
+
+        <!-- Settings Panel (slides in from right) -->
+        <div class="settings-panel" id="settings-panel">
+            <div class="settings-header">
+                <span>Settings</span>
+                <button class="settings-close-btn" onclick="toggleSettings()">&times;</button>
+            </div>
+            <div class="settings-body">
+                <div class="settings-section">
+                    <div class="settings-section-title">Reminders</div>
+                    <div class="settings-row">
+                        <span>Enable reminders</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="setting-reminders" onchange="updateSetting('remindersEnabled', this.checked)">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="settings-row">
+                        <span>Interval</span>
+                        <select id="setting-interval" onchange="updateSetting('reminderInterval', parseInt(this.value))">
+                            <option value="15">15 min</option>
+                            <option value="30">30 min</option>
+                            <option value="60">1 hour</option>
+                            <option value="120">2 hours</option>
+                            <option value="240">4 hours</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <div class="settings-section-title">Appearance</div>
+                    <div class="settings-row">
+                        <span>Show input area</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="setting-show-input" checked onchange="toggleInputArea()">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="settings-row">
+                        <span>Show quote</span>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="setting-show-quote" checked onchange="toggleQuoteArea()">
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                    <div class="settings-row">
+                        <span>Opacity</span>
+                        <span class="settings-value" id="opacity-label">100%</span>
+                        <input type="range" class="settings-range" id="setting-opacity" min="50" max="100" value="100" oninput="updateSetting('windowOpacity', parseInt(this.value))">
+                    </div>
+                    <div class="settings-row">
+                        <span>UI font</span>
+                        <span class="settings-value" id="ui-font-label">14px</span>
+                        <div class="settings-btn-group">
+                            <button onclick="changeUiFontSize(-1)">-</button>
+                            <button onclick="changeUiFontSize(1)">+</button>
+                        </div>
+                    </div>
+                    <div class="settings-row">
+                        <span>Todo font</span>
+                        <span class="settings-value" id="todo-font-label">15px</span>
+                        <div class="settings-btn-group">
+                            <button onclick="changeTodoFontSize(-1)">-</button>
+                            <button onclick="changeTodoFontSize(1)">+</button>
+                        </div>
+                    </div>
+                </div>
+                <div class="settings-section">
+                    <div class="settings-section-title">Actions</div>
+                    <div class="settings-row">
+                        <button class="settings-action-btn" onclick="resetSettings()">Reset to Default</button>
+                    </div>
+                    <div class="settings-row">
+                        <button class="settings-action-btn" onclick="restartWidget()">Restart Widget</button>
+                    </div>
+                    <div class="settings-row">
+                        <button class="settings-action-btn danger" onclick="closeWidget()">Close Widget</button>
+                    </div>
+                </div>
+                <div class="settings-info" id="settings-info"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Honey Pot transition overlay (Riya only) -->
+    <div class="honey-transition" id="honey-transition">
+        <img src="assets/pooh.gif" alt="Pooh" class="pooh-gif" id="pooh-gif">
+    </div>
+
+    <!-- Honey Pot sound -->
+    <audio id="honey-sound" preload="auto">
+        <source src="assets/pooh_voice.mp3" type="audio/mpeg">
+    </audio>
+
+    <script src="app.js"></script>
+</body>
+</html>

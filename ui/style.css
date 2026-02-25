@@ -1,0 +1,939 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    -webkit-user-select: none;
+    user-select: none;
+}
+
+:root {
+    --note-bg: #FFF8B5;
+    --note-bg-dark: #F5EDA5;
+    --text: #3E2C1C;
+    --text-dim: #8B7355;
+    --text-faint: #B0A080;
+    --accent: #D4590A;
+    --accent-green: #4A7C3F;
+    --check-done: #7A9A6E;
+    --delete-red: #C0503A;
+    --input-bg: #FFF3A0;
+    --shadow: rgba(80, 60, 30, 0.25);
+    --ui-font-size: 14px;
+    --todo-font-size: 15px;
+}
+
+/* ---- Riya's Pink Theme ---- */
+[data-theme="riya"] {
+    --note-bg: #FFE4EC;
+    --note-bg-dark: #FFD1DC;
+    --text: #5C2434;
+    --text-dim: #9B5A6E;
+    --text-faint: #CDA0AE;
+    --accent: #E85D8C;
+    --accent-green: #7CB69A;
+    --check-done: #7CB69A;
+    --delete-red: #D94F6B;
+    --input-bg: #FFD6E5;
+    --shadow: rgba(120, 50, 70, 0.2);
+}
+
+[data-theme="riya"] .sticky-note::before {
+    background: linear-gradient(225deg, rgba(200, 50, 100, 0.08) 50%, transparent 50%);
+}
+
+body {
+    background: transparent;
+    font-family: 'Segoe Print', 'Comic Sans MS', 'Ink Free', cursive;
+    font-size: var(--ui-font-size);
+    color: var(--text);
+    overflow: hidden;
+    height: 100vh;
+}
+
+.sticky-note {
+    background: var(--note-bg);
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    border-radius: 4px;
+    box-shadow: 3px 3px 12px var(--shadow), 0 0 1px rgba(0,0,0,0.1);
+    position: relative;
+    overflow: hidden;
+}
+
+/* Subtle fold effect top-right */
+.sticky-note::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    right: 0;
+    width: 30px;
+    height: 30px;
+    background: linear-gradient(225deg, rgba(0,0,0,0.06) 50%, transparent 50%);
+    pointer-events: none;
+    z-index: 10;
+}
+
+/* ---- Header / drag region ---- */
+.header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px 6px;
+    cursor: grab;
+}
+
+.header:active { cursor: grabbing; }
+
+.title {
+    font-size: 1.25em;
+    font-weight: bold;
+    color: var(--accent);
+    letter-spacing: 0.5px;
+}
+
+.header-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    -webkit-user-select: none;
+}
+
+.minimize-btn {
+    background: transparent;
+    border: 1.5px solid var(--text-faint);
+    border-radius: 4px;
+    color: var(--text-dim);
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 0.7em;
+    font-weight: bold;
+    padding: 0px 6px 2px;
+    cursor: pointer;
+    transition: all 0.15s;
+    line-height: 1.2;
+}
+
+.minimize-btn:hover {
+    background: var(--text-dim);
+    color: var(--note-bg);
+}
+
+
+/* ---- Honey Pot toggle ---- */
+.honey-pot-toggle {
+    background: transparent;
+    border: 1.5px solid var(--text-faint);
+    border-radius: 4px;
+    cursor: pointer;
+    padding: 1px 5px;
+    transition: all 0.2s;
+    line-height: 1.2;
+    font-size: 1em;
+}
+
+.honey-pot-toggle:hover {
+    background: rgba(255, 215, 0, 0.25);
+    border-color: #DAA520;
+}
+
+.honey-pot-toggle.active {
+    background: #FFD700;
+    border-color: #DAA520;
+    box-shadow: 0 0 6px rgba(255, 215, 0, 0.4);
+}
+
+/* ---- Streak + Greeting ---- */
+.streak-area {
+    padding: 2px 18px 4px;
+    font-size: var(--ui-font-size);
+}
+
+#streak-text {
+    display: block;
+    font-size: 0.9em;
+    font-weight: bold;
+    color: var(--accent);
+}
+
+#greeting-text {
+    display: block;
+    font-size: 0.75em;
+    color: var(--text-dim);
+    margin-top: 1px;
+}
+
+/* ---- Quote ---- */
+.quote-area {
+    padding: 8px 18px 10px;
+    border-top: 1px dashed var(--text-faint);
+    border-bottom: 1px dashed var(--text-faint);
+    margin: 4px 14px 8px;
+    font-size: var(--ui-font-size);
+}
+
+#quote-text {
+    font-size: 0.8em;
+    font-style: italic;
+    color: var(--text-dim);
+    line-height: 1.45;
+}
+
+#quote-author {
+    font-size: 0.68em;
+    color: var(--text-faint);
+    text-align: right;
+    margin-top: 4px;
+}
+
+/* ---- Todo list ---- */
+.todo-area {
+    flex: 1;
+    overflow-y: auto;
+    padding: 6px 14px;
+    min-height: 0;
+}
+
+.todo-area::-webkit-scrollbar {
+    width: 6px;
+}
+.todo-area::-webkit-scrollbar-thumb {
+    background: var(--text-faint);
+    border-radius: 3px;
+}
+
+.empty-state {
+    text-align: center;
+    color: var(--text-faint);
+    padding: 30px 10px;
+    font-size: var(--ui-font-size);
+}
+
+.todo-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 5px 4px;
+    border-bottom: 1px dotted rgba(0,0,0,0.06);
+    transition: background 0.15s;
+    font-size: var(--todo-font-size);
+}
+
+.todo-item:hover {
+    background: rgba(0,0,0,0.03);
+    border-radius: 4px;
+}
+
+.todo-item.nested {
+    border-bottom: none;
+    padding-top: 3px;
+    padding-bottom: 3px;
+}
+
+.todo-item.nested input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    min-width: 16px;
+    margin-top: 3px;
+}
+
+.todo-item.nested input[type="checkbox"]:checked::after {
+    left: 3px;
+    top: 0px;
+    width: 4px;
+    height: 8px;
+    border-width: 0 2px 2px 0;
+}
+
+.todo-item input[type="checkbox"] {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 20px;
+    height: 20px;
+    min-width: 20px;
+    border: 2px solid var(--text-dim);
+    border-radius: 4px;
+    cursor: pointer;
+    margin-top: 2px;
+    position: relative;
+    transition: all 0.15s;
+}
+
+.todo-item input[type="checkbox"]:checked {
+    background: var(--check-done);
+    border-color: var(--check-done);
+}
+
+.todo-item input[type="checkbox"]:checked::after {
+    content: '';
+    position: absolute;
+    left: 5px;
+    top: 1px;
+    width: 5px;
+    height: 10px;
+    border: solid white;
+    border-width: 0 2.5px 2.5px 0;
+    transform: rotate(45deg);
+}
+
+.todo-text {
+    flex: 1;
+    outline: none;
+    min-height: 1.3em;
+    line-height: 1.4;
+    word-break: break-word;
+    -webkit-user-select: text;
+    user-select: text;
+    padding: 1px 2px;
+    border-radius: 3px;
+    transition: background 0.15s;
+}
+
+.todo-text:focus {
+    background: rgba(0,0,0,0.04);
+}
+
+.todo-text.done {
+    text-decoration: line-through;
+    color: var(--text-faint);
+}
+
+.delete-btn {
+    background: transparent;
+    border: none;
+    color: var(--text-faint);
+    font-size: 1.1em;
+    cursor: pointer;
+    padding: 0 4px;
+    opacity: 0;
+    transition: opacity 0.15s, color 0.15s;
+    font-family: sans-serif;
+}
+
+.todo-item:hover .delete-btn,
+.honey-message:hover .delete-btn {
+    opacity: 1;
+}
+
+.delete-btn:hover {
+    color: var(--delete-red);
+}
+
+/* ---- Honey Pot messages ---- */
+.honey-message {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 8px 12px;
+    margin: 4px 0;
+    background: rgba(255, 248, 181, 0.9);
+    border-radius: 8px;
+    border-left: 3px solid #FFD700;
+    font-size: var(--todo-font-size);
+    position: relative;
+}
+
+[data-theme="riya"] .honey-message {
+    background: rgba(255, 228, 236, 0.9);
+    border-left-color: #FF8FAB;
+}
+
+.honey-message .msg-content {
+    flex: 1;
+}
+
+.honey-message .msg-text {
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.honey-message .msg-text[contenteditable="true"] {
+    outline: none;
+    cursor: text;
+    border-radius: 4px;
+    padding: 1px 3px;
+    margin: -1px -3px;
+    transition: background 0.15s;
+}
+
+.honey-message .msg-text[contenteditable="true"]:focus {
+    background: rgba(0,0,0,0.04);
+}
+
+.honey-message .msg-meta {
+    font-size: 0.7em;
+    color: var(--text-faint);
+    margin-top: 4px;
+}
+
+.todo-area.honeypot-bg {
+    background-image: url('assets/pooh_bg_svg.png');
+    background-repeat: no-repeat;
+    background-position: center center;
+    background-size: 60%;
+}
+
+/* ---- Honey Pot transition overlay ---- */
+.honey-transition {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(255, 215, 0, 0.12);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+    z-index: 100;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.6s ease;
+}
+
+.honey-transition.show {
+    opacity: 1;
+    pointer-events: auto;
+    transition: opacity 0.6s ease;
+}
+
+.honey-transition .pooh-gif {
+    width: 160px;
+    height: auto;
+    animation: pooh-pop 0.8s ease-in-out;
+}
+
+[data-theme="riya"] .honey-transition {
+    background: rgba(255, 150, 180, 0.2);
+}
+
+@keyframes pooh-pop {
+    0%   { transform: scale(0) rotate(-10deg); opacity: 0; }
+    60%  { transform: scale(1.15) rotate(5deg); opacity: 1; }
+    100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+
+/* ---- Add area ---- */
+.add-area {
+    padding: 8px 14px 12px;
+    border-top: 1px dashed var(--text-faint);
+    margin-top: auto;
+}
+
+.toolbar {
+    display: flex;
+    gap: 4px;
+    margin-bottom: 6px;
+    align-items: center;
+}
+
+.toolbar button {
+    background: transparent;
+    border: 1.5px solid var(--text-faint);
+    border-radius: 4px;
+    color: var(--text-dim);
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 0.72em;
+    padding: 2px 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+    min-width: 28px;
+    text-align: center;
+}
+
+.toolbar button:hover,
+.toolbar button.active {
+    background: var(--text-dim);
+    color: var(--note-bg);
+}
+
+.toolbar .separator {
+    width: 1px;
+    height: 18px;
+    background: var(--text-faint);
+    margin: 0 4px;
+    opacity: 0.5;
+}
+
+.toolbar .emoji-btn {
+    font-size: 0.9em;
+    padding: 1px 4px;
+    min-width: 28px;
+    border: 1.5px solid var(--text-faint);
+    line-height: 1;
+}
+
+.emoji-picker {
+    display: none;
+    background: var(--note-bg);
+    border: 1.5px solid var(--text-faint);
+    border-radius: 8px;
+    box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    margin-bottom: 6px;
+    overflow: hidden;
+    animation: fadeInPicker 0.15s ease;
+}
+
+.emoji-picker.open {
+    display: block;
+}
+
+@keyframes fadeInPicker {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.emoji-tabs {
+    display: flex;
+    border-bottom: 1px solid var(--text-faint);
+    padding: 2px 4px 0;
+    gap: 2px;
+    overflow-x: auto;
+}
+
+.emoji-tabs button {
+    background: none;
+    border: none;
+    font-size: 0.85em;
+    padding: 4px 6px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    opacity: 0.6;
+    transition: all 0.15s;
+    flex-shrink: 0;
+}
+
+.emoji-tabs button:hover {
+    opacity: 1;
+}
+
+.emoji-tabs button.active {
+    opacity: 1;
+    border-bottom-color: var(--accent);
+}
+
+.emoji-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 2px;
+    padding: 6px;
+    max-height: 150px;
+    overflow-y: auto;
+}
+
+.emoji-grid button {
+    background: none;
+    border: none;
+    font-size: 1.2em;
+    padding: 3px;
+    cursor: pointer;
+    border-radius: 4px;
+    transition: background 0.1s;
+    text-align: center;
+    line-height: 1.3;
+}
+
+.emoji-grid button:hover {
+    background: rgba(0,0,0,0.08);
+}
+
+.input-row {
+    display: flex;
+    gap: 8px;
+    align-items: stretch;
+}
+
+.depth-indicator {
+    display: none;
+    align-items: center;
+    color: var(--text-faint);
+    font-size: 0.85em;
+    padding-left: 2px;
+    user-select: none;
+    white-space: nowrap;
+    letter-spacing: -2px;
+}
+
+.depth-indicator.visible {
+    display: flex;
+}
+
+#new-todo {
+    flex: 1;
+    min-height: 34px;
+    max-height: 60px;
+    overflow-y: auto;
+    padding: 6px 10px;
+    transition: padding-left 0.15s ease;
+    background: var(--input-bg);
+    border: 1.5px solid var(--text-faint);
+    border-radius: 8px;
+    font-family: inherit;
+    font-size: var(--todo-font-size);
+    color: var(--text);
+    outline: none;
+    -webkit-user-select: text;
+    user-select: text;
+    line-height: 1.4;
+}
+
+#new-todo:focus {
+    border-color: var(--text-dim);
+}
+
+#new-todo:empty::before {
+    content: attr(data-placeholder);
+    color: var(--text-faint);
+    pointer-events: none;
+}
+
+#add-btn {
+    background: var(--accent-green);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    font-size: 1.3em;
+    font-weight: bold;
+    width: 38px;
+    cursor: pointer;
+    font-family: sans-serif;
+    transition: background 0.15s;
+}
+
+#add-btn:hover {
+    background: #3D6B33;
+}
+
+/* ---- Resize handles (frameless window, all sides + corners) ---- */
+.resize-handle {
+    position: fixed;
+    z-index: 999;
+}
+
+.resize-handle-top {
+    top: 0; left: 6px; right: 6px;
+    height: 5px;
+    cursor: ns-resize;
+}
+
+.resize-handle-bottom {
+    bottom: 0; left: 6px; right: 6px;
+    height: 5px;
+    cursor: ns-resize;
+}
+
+.resize-handle-left {
+    left: 0; top: 6px; bottom: 6px;
+    width: 5px;
+    cursor: ew-resize;
+}
+
+.resize-handle-right {
+    right: 0; top: 6px; bottom: 6px;
+    width: 5px;
+    cursor: ew-resize;
+}
+
+.resize-handle-top-left {
+    top: 0; left: 0;
+    width: 10px; height: 10px;
+    cursor: nwse-resize;
+}
+
+.resize-handle-top-right {
+    top: 0; right: 0;
+    width: 10px; height: 10px;
+    cursor: nesw-resize;
+}
+
+.resize-handle-bottom-left {
+    bottom: 0; left: 0;
+    width: 10px; height: 10px;
+    cursor: nesw-resize;
+}
+
+.resize-handle-bottom-right {
+    bottom: 0; right: 0;
+    width: 10px; height: 10px;
+    cursor: nwse-resize;
+}
+
+/* ---- Font size selector in toolbar ---- */
+.toolbar select {
+    background: var(--input-bg);
+    border: 1.5px solid var(--text-faint);
+    border-radius: 4px;
+    color: var(--text-dim);
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 0.72em;
+    padding: 2px 4px;
+    cursor: pointer;
+    outline: none;
+    transition: all 0.15s;
+}
+
+.toolbar select:hover,
+.toolbar select:focus {
+    border-color: var(--text-dim);
+}
+
+/* ---- Header icon buttons (refresh, settings) ---- */
+.header-icon-btn {
+    background: transparent;
+    border: 1.5px solid var(--text-faint);
+    border-radius: 4px;
+    color: var(--text-dim);
+    font-size: 0.85em;
+    padding: 0px 5px 1px;
+    cursor: pointer;
+    transition: all 0.15s;
+    line-height: 1.3;
+}
+
+.header-icon-btn:hover {
+    background: var(--text-dim);
+    color: var(--note-bg);
+}
+
+/* Refresh spin animation */
+#refresh-btn.spinning {
+    animation: spin-once 0.4s ease-in-out;
+}
+
+@keyframes spin-once {
+    0%   { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* ---- Settings panel ---- */
+.settings-panel {
+    position: absolute;
+    top: 0;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    background: var(--note-bg);
+    z-index: 50;
+    display: flex;
+    flex-direction: column;
+    transform: translateX(100%);
+    transition: transform 0.25s ease;
+}
+
+.settings-panel.open {
+    transform: translateX(0);
+}
+
+.settings-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 18px 8px;
+    font-size: 1.15em;
+    font-weight: bold;
+    color: var(--accent);
+}
+
+.settings-close-btn {
+    background: transparent;
+    border: 1.5px solid var(--text-faint);
+    border-radius: 4px;
+    color: var(--text-dim);
+    font-size: 1.1em;
+    padding: 0 6px;
+    cursor: pointer;
+    transition: all 0.15s;
+    font-family: sans-serif;
+    line-height: 1.3;
+}
+
+.settings-close-btn:hover {
+    background: var(--text-dim);
+    color: var(--note-bg);
+}
+
+.settings-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 4px 18px 14px;
+}
+
+.settings-body::-webkit-scrollbar {
+    width: 6px;
+}
+.settings-body::-webkit-scrollbar-thumb {
+    background: var(--text-faint);
+    border-radius: 3px;
+}
+
+.settings-section {
+    margin-bottom: 14px;
+}
+
+.settings-section-title {
+    font-size: 0.72em;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    color: var(--text-faint);
+    margin-bottom: 6px;
+    font-family: 'Segoe UI', sans-serif;
+    font-weight: 600;
+}
+
+.settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 0;
+    font-size: 0.88em;
+    gap: 8px;
+}
+
+.settings-row > span:first-child {
+    flex-shrink: 0;
+}
+
+.settings-value {
+    font-size: 0.8em;
+    color: var(--text-faint);
+    font-family: 'Segoe UI', sans-serif;
+    min-width: 32px;
+    text-align: right;
+}
+
+/* iOS-style toggle switch */
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 36px;
+    height: 20px;
+    flex-shrink: 0;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: var(--text-faint);
+    border-radius: 20px;
+    transition: 0.25s;
+}
+
+.toggle-slider::before {
+    content: '';
+    position: absolute;
+    height: 14px;
+    width: 14px;
+    left: 3px;
+    bottom: 3px;
+    background: white;
+    border-radius: 50%;
+    transition: 0.25s;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+    background: var(--accent-green);
+}
+
+.toggle-switch input:checked + .toggle-slider::before {
+    transform: translateX(16px);
+}
+
+/* Settings range (opacity slider) */
+.settings-range {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 80px;
+    height: 4px;
+    background: var(--text-faint);
+    border-radius: 2px;
+    outline: none;
+    cursor: pointer;
+}
+
+.settings-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 14px;
+    height: 14px;
+    background: var(--accent);
+    border-radius: 50%;
+    cursor: pointer;
+}
+
+/* Settings button group (font +/-) */
+.settings-btn-group {
+    display: flex;
+    gap: 3px;
+}
+
+.settings-btn-group button {
+    background: transparent;
+    border: 1.5px solid var(--text-faint);
+    border-radius: 4px;
+    color: var(--text-dim);
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 0.75em;
+    padding: 1px 7px;
+    cursor: pointer;
+    transition: all 0.15s;
+    line-height: 1.3;
+}
+
+.settings-btn-group button:hover {
+    background: var(--text-dim);
+    color: var(--note-bg);
+}
+
+/* Settings select */
+.settings-row select {
+    background: var(--input-bg);
+    border: 1.5px solid var(--text-faint);
+    border-radius: 4px;
+    color: var(--text-dim);
+    font-family: 'Segoe UI', sans-serif;
+    font-size: 0.8em;
+    padding: 3px 6px;
+    cursor: pointer;
+    outline: none;
+}
+
+/* Settings action buttons */
+.settings-action-btn {
+    width: 100%;
+    padding: 8px 12px;
+    background: transparent;
+    border: 1.5px solid var(--text-dim);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 0.85em;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.settings-action-btn:hover {
+    background: var(--text-dim);
+    color: var(--note-bg);
+}
+
+.settings-action-btn.danger {
+    border-color: var(--delete-red);
+    color: var(--delete-red);
+}
+
+.settings-action-btn.danger:hover {
+    background: var(--delete-red);
+    color: white;
+}
+
+/* Settings info footer */
+.settings-info {
+    text-align: center;
+    font-size: 0.68em;
+    color: var(--text-faint);
+    padding: 10px 0 6px;
+    font-family: 'Segoe UI', sans-serif;
+}
