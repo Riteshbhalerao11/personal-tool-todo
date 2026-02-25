@@ -22,6 +22,7 @@
             <span class="title" id="widget-title">My Todos</span>
             <div class="header-controls">
                 <button class="honey-pot-toggle" id="honey-toggle" onclick="toggleHoneyPot()" title="Honey Pot">&#x1F36F;</button>
+                <button class="header-icon-btn" id="toggle-input-btn" onclick="toggleInputArea()" title="Toggle input">&#x270F;</button>
                 <button class="header-icon-btn" id="clear-btn" onclick="clearAllTodos()" title="Clear all">&#x2715;</button>
                 <button class="header-icon-btn" id="refresh-btn" onclick="manualRefresh()" title="Refresh">&#x21BB;</button>
                 <button class="header-icon-btn" id="settings-btn" onclick="toggleSettings()" title="Settings">&#x2699;</button>
@@ -102,13 +103,6 @@
                 </div>
                 <div class="settings-section">
                     <div class="settings-section-title">Appearance</div>
-                    <div class="settings-row">
-                        <span>Show input area</span>
-                        <label class="toggle-switch">
-                            <input type="checkbox" id="setting-show-input" checked onchange="toggleInputArea()">
-                            <span class="toggle-slider"></span>
-                        </label>
-                    </div>
                     <div class="settings-row">
                         <span>Show quote</span>
                         <label class="toggle-switch">
