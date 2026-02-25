@@ -216,11 +216,52 @@ body {
     border-bottom: 1px dotted rgba(0,0,0,0.06);
     transition: background 0.15s;
     font-size: var(--todo-font-size);
+    position: relative;
 }
 
 .todo-item:hover {
     background: rgba(0,0,0,0.03);
     border-radius: 4px;
+}
+
+/* Drag handle */
+.drag-handle {
+    opacity: 0;
+    cursor: grab;
+    color: var(--text-faint);
+    font-size: 14px;
+    line-height: 1.4;
+    user-select: none;
+    -webkit-user-select: none;
+    padding: 0 1px;
+    transition: opacity 0.15s;
+    flex-shrink: 0;
+}
+
+.todo-item:hover .drag-handle {
+    opacity: 0.6;
+}
+
+.drag-handle:hover {
+    opacity: 1 !important;
+    color: var(--text-dim);
+}
+
+.drag-handle:active {
+    cursor: grabbing;
+}
+
+/* Drag states */
+.todo-item.dragging {
+    opacity: 0.4;
+}
+
+.todo-item.drag-over-top {
+    box-shadow: 0 -2px 0 0 var(--accent);
+}
+
+.todo-item.drag-over-bottom {
+    box-shadow: 0 2px 0 0 var(--accent);
 }
 
 .todo-item.nested {

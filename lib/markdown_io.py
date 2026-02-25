@@ -318,6 +318,30 @@ def set_todo_depth(date, index, depth):
     write_todo_file(sections)
 
 
+def reorder_todo_item(date, from_index, to_index):
+    sections = read_todo_sections()
+    for s in sections:
+        if s['date'] != date:
+            continue
+        items = s['items']
+        if not (0 <= from_index < len(items) and 0 <= to_index < len(items)):
+            break
+        item = items.pop(from_index)
+        items.insert(to_index, item)
+        break
+    write_todo_file(sections)
+
+
+def insert_todo_item(date, after_index, text, depth=0):
+    sections = read_todo_sections()
+    for s in sections:
+        if s['date'] == date:
+            new_item = {'text': text, 'done': False, 'depth': max(0, min(3, depth))}
+            s['items'].insert(after_index + 1, new_item)
+            break
+    write_todo_file(sections)
+
+
 # --- Honey Pot ---
 
 def read_honey_pot_messages():

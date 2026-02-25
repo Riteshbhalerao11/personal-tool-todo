@@ -17,6 +17,7 @@ import pystray
 from lib.markdown_io import (
     init_folder, get_todo_path, get_today_items, add_todo_item,
     set_todo_done, remove_todo_item, update_todo_text, set_todo_depth,
+    reorder_todo_item, insert_todo_item,
     clear_today_items, read_tracker, save_tracker, get_today_str,
     set_persona, get_persona, get_honey_pot_path,
     read_honey_pot_messages, add_honey_pot_message, update_honey_pot_message,
@@ -108,38 +109,40 @@ class Api:
             'persona': self._persona,
         }
 
+    def _update_mtime(self):
+        """Update cached mtime so file watcher ignores our own writes."""
+        try:
+            self._last_mtime = os.path.getmtime(get_todo_path())
+        except OSError:
+            pass
+
     def add_todo(self, text):
-        self._suppress_watch = True
         add_todo_item(text)
-        self._suppress_watch = False
+        self._update_mtime()
         self._sync_todos()
         return get_today_items()
 
     def add_todo_at_depth(self, text, depth):
-        self._suppress_watch = True
         add_todo_item(text, depth=max(0, min(3, int(depth))))
-        self._suppress_watch = False
+        self._update_mtime()
         self._sync_todos()
         return get_today_items()
 
     def toggle_todo(self, index, done):
-        self._suppress_watch = True
         set_todo_done(get_today_str(), index, done)
-        self._suppress_watch = False
+        self._update_mtime()
         self._sync_todos()
         return get_today_items()
 
     def delete_todo(self, index):
-        self._suppress_watch = True
         remove_todo_item(get_today_str(), index)
-        self._suppress_watch = False
+        self._update_mtime()
         self._sync_todos()
         return get_today_items()
 
     def update_todo_text(self, index, text):
-        self._suppress_watch = True
         update_todo_text(get_today_str(), index, text)
-        self._suppress_watch = False
+        self._update_mtime()
         self._sync_todos()
 
     def confirm_and_clear_todos(self):
@@ -153,16 +156,26 @@ class Api:
         )
         if result != IDYES:
             return None
-        self._suppress_watch = True
         clear_today_items(get_today_str())
-        self._suppress_watch = False
+        self._update_mtime()
         self._sync_todos()
         return get_today_items()
 
     def set_todo_depth(self, index, depth):
-        self._suppress_watch = True
         set_todo_depth(get_today_str(), index, depth)
-        self._suppress_watch = False
+        self._update_mtime()
+        self._sync_todos()
+        return get_today_items()
+
+    def reorder_todo(self, from_index, to_index):
+        reorder_todo_item(get_today_str(), int(from_index), int(to_index))
+        self._update_mtime()
+        self._sync_todos()
+        return get_today_items()
+
+    def insert_todo_after(self, index, text, depth):
+        insert_todo_item(get_today_str(), int(index), str(text).strip(), max(0, min(3, int(depth))))
+        self._update_mtime()
         self._sync_todos()
         return get_today_items()
 
@@ -211,23 +224,26 @@ class Api:
     def get_honey_pot_messages(self):
         return read_honey_pot_messages()
 
+    def _update_honey_mtime(self):
+        try:
+            self._last_honey_mtime = os.path.getmtime(get_honey_pot_path())
+        except OSError:
+            pass
+
     def add_honey_pot_msg(self, text):
-        self._suppress_watch = True
         add_honey_pot_message(text, self._persona)
-        self._suppress_watch = False
+        self._update_honey_mtime()
         self._sync_honeypot()
         return read_honey_pot_messages()
 
     def update_honey_pot_msg(self, index, text):
-        self._suppress_watch = True
         update_honey_pot_message(index, text)
-        self._suppress_watch = False
+        self._update_honey_mtime()
         self._sync_honeypot()
 
     def delete_honey_pot_msg(self, index):
-        self._suppress_watch = True
         remove_honey_pot_message(index)
-        self._suppress_watch = False
+        self._update_honey_mtime()
         self._sync_honeypot()
         return read_honey_pot_messages()
 
@@ -241,9 +257,8 @@ class Api:
         )
         if result != IDYES:
             return None
-        self._suppress_watch = True
         clear_honey_pot_messages()
-        self._suppress_watch = False
+        self._update_honey_mtime()
         self._sync_honeypot()
         return read_honey_pot_messages()
 

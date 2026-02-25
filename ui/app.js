@@ -116,6 +116,8 @@ function htmlToMd(html) {
     return text.trim();
 }
 
+let dragFromIndex = null;
+
 function renderTodos(items) {
     const list = document.getElementById('todo-list');
     list.innerHTML = '';
@@ -138,9 +140,64 @@ function renderTodos(items) {
         const depth = item.depth || 0;
         const row = document.createElement('div');
         row.className = 'todo-item' + (depth > 0 ? ' nested' : '');
+        row.dataset.index = index;
         if (depth > 0) {
             row.style.paddingLeft = (depth * 20 + 4) + 'px';
         }
+
+        // Drag handle
+        const handle = document.createElement('span');
+        handle.className = 'drag-handle';
+        handle.textContent = '\u2847';
+        handle.title = 'Drag to reorder';
+        handle.addEventListener('mousedown', () => { row.draggable = true; });
+
+        row.addEventListener('dragstart', (e) => {
+            dragFromIndex = index;
+            row.classList.add('dragging');
+            e.dataTransfer.effectAllowed = 'move';
+        });
+        row.addEventListener('dragend', () => {
+            row.draggable = false;
+            row.classList.remove('dragging');
+            dragFromIndex = null;
+            list.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
+                el.classList.remove('drag-over-top', 'drag-over-bottom');
+            });
+        });
+        row.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+            if (dragFromIndex === null || dragFromIndex === index) return;
+            const rect = row.getBoundingClientRect();
+            const midY = rect.top + rect.height / 2;
+            row.classList.toggle('drag-over-top', e.clientY < midY);
+            row.classList.toggle('drag-over-bottom', e.clientY >= midY);
+        });
+        row.addEventListener('dragleave', () => {
+            row.classList.remove('drag-over-top', 'drag-over-bottom');
+        });
+        row.addEventListener('drop', async (e) => {
+            e.preventDefault();
+            row.classList.remove('drag-over-top', 'drag-over-bottom');
+            if (dragFromIndex === null || dragFromIndex === index) return;
+            const rect = row.getBoundingClientRect();
+            const midY = rect.top + rect.height / 2;
+            let toIndex = e.clientY < midY ? index : index;
+            // Adjust: if dropping below the midpoint, insert after this item
+            if (e.clientY >= midY && dragFromIndex < index) {
+                toIndex = index;
+            } else if (e.clientY >= midY && dragFromIndex > index) {
+                toIndex = index + 1;
+            } else if (e.clientY < midY && dragFromIndex < index) {
+                toIndex = index - 1;
+            } else {
+                toIndex = index;
+            }
+            const result = await api('reorder_todo', dragFromIndex, toIndex);
+            if (result) renderTodos(result);
+            dragFromIndex = null;
+        });
 
         const cb = document.createElement('input');
         cb.type = 'checkbox';
@@ -184,6 +241,7 @@ function renderTodos(items) {
         del.title = 'Delete';
         del.addEventListener('click', () => deleteTodo(index));
 
+        row.appendChild(handle);
         row.appendChild(cb);
         row.appendChild(span);
         row.appendChild(del);
@@ -683,6 +741,9 @@ document.getElementById('new-todo').addEventListener('keydown', (e) => {
 
 async function refreshFromFile() {
     if (isRefreshing || honeyPotMode) return;
+    // Skip refresh if user is editing a todo
+    const active = document.activeElement;
+    if (active && active.classList.contains('todo-text')) return;
     isRefreshing = true;
     try {
         const data = await api('get_initial_data');
