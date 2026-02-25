@@ -3,6 +3,11 @@
 
 $script:TodoWidgetDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 
+# Detect which personas are installed via startup shortcuts
+$script:StartupDir = "$env:APPDATA\Microsoft\Windows\Start Menu\Programs\Startup"
+$script:RiteshInstalled = Test-Path "$script:StartupDir\Todo Widget.lnk"
+$script:RiyaInstalled = Test-Path "$script:StartupDir\Riyas Todos.lnk"
+
 function todo-up {
     param([switch]$ForRiya)
     $suffix = if ($ForRiya) { "-riya" } else { "-ritesh" }
@@ -68,9 +73,16 @@ function todo-restart {
     }
 }
 
-# Convenience aliases for Riya's version
-function todo-riya-up      { todo-up -ForRiya }
-function todo-riya-down    { todo-down -ForRiya }
-function todo-riya-restart { todo-restart -ForRiya }
+# Only register riya aliases if riya is installed
+if ($script:RiyaInstalled) {
+    function todo-riya-up      { todo-up -ForRiya }
+    function todo-riya-down    { todo-down -ForRiya }
+    function todo-riya-restart { todo-restart -ForRiya }
+}
 
-Write-Host "Todo commands loaded: todo-up, todo-down, todo-restart, todo-riya-up, todo-riya-down, todo-riya-restart" -ForegroundColor DarkGray
+# Show only installed commands
+$cmds = @()
+if ($script:RiteshInstalled) { $cmds += "todo-up, todo-down, todo-restart" }
+if ($script:RiyaInstalled)   { $cmds += "todo-riya-up, todo-riya-down, todo-riya-restart" }
+if ($cmds.Count -eq 0)       { $cmds += "todo-up, todo-down, todo-restart" }
+Write-Host "Todo commands loaded: $($cmds -join ', ')" -ForegroundColor DarkGray
