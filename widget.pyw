@@ -37,7 +37,6 @@ GWL_EXSTYLE = -20
 GWL_STYLE = -16
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_APPWINDOW = 0x00040000
-WS_THICKFRAME = 0x00040000
 
 
 def find_hwnd_by_pid(pid):
@@ -71,20 +70,15 @@ def hide_from_taskbar(hwnd):
     user32.ShowWindow(hwnd, 5)  # SW_SHOW
 
 
-def enable_native_resize(hwnd, persona='ritesh'):
-    """Add native resize borders to frameless window with matching border color."""
+def apply_dwm_tweaks(hwnd):
+    """Apply DWM visual tweaks (border hiding, rounded corners) on Windows 11+."""
     if not hwnd:
         return
-    user32 = ctypes.windll.user32
-
-    # Add WS_THICKFRAME for native resize borders
-    style = user32.GetWindowLongW(hwnd, GWL_STYLE)
-    style |= WS_THICKFRAME
-    user32.SetWindowLongW(hwnd, GWL_STYLE, style)
-
-    # Hide the DWM border entirely (Windows 11+)
+    # DWM tweaks (Windows 11+)
     try:
         dwmapi = ctypes.windll.dwmapi
+
+        # Hide the thin border line
         DWMWA_BORDER_COLOR = 34
         DWMWA_COLOR_NONE = 0xFFFFFFFE
         color = ctypes.c_uint(DWMWA_COLOR_NONE)
@@ -92,18 +86,18 @@ def enable_native_resize(hwnd, persona='ritesh'):
             hwnd, DWMWA_BORDER_COLOR,
             ctypes.byref(color), ctypes.sizeof(color)
         )
+
+        # Force rounded corners
+        DWMWA_WINDOW_CORNER_PREFERENCE = 33
+        DWMWCP_ROUND = 2
+        corner_pref = ctypes.c_int(DWMWCP_ROUND)
+        dwmapi.DwmSetWindowAttribute(
+            hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
+            ctypes.byref(corner_pref), ctypes.sizeof(corner_pref)
+        )
+
     except Exception:
         pass
-
-    # Force Windows to recalculate the frame
-    SWP_FRAMECHANGED = 0x0020
-    SWP_NOMOVE = 0x0002
-    SWP_NOSIZE = 0x0001
-    SWP_NOZORDER = 0x0004
-    user32.SetWindowPos(
-        hwnd, None, 0, 0, 0, 0,
-        SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER
-    )
 
 
 class Api:
@@ -253,6 +247,17 @@ class Api:
         """Hide window to system tray."""
         if self._window:
             self._window.hide()
+
+    def get_window_rect(self):
+        """Return the actual Win32 window rect {x, y, w, h} in physical pixels."""
+        if self._hwnd:
+            rect = ctypes.wintypes.RECT()
+            ctypes.windll.user32.GetWindowRect(self._hwnd, ctypes.byref(rect))
+            return {
+                'x': rect.left, 'y': rect.top,
+                'w': rect.right - rect.left, 'h': rect.bottom - rect.top,
+            }
+        return None
 
     def resize_window(self, w, h):
         """Called from JS drag-resize handler."""
@@ -798,7 +803,7 @@ def main():
         time.sleep(0.5)
         api_obj._hwnd = find_hwnd_by_pid(os.getpid())
         hide_from_taskbar(api_obj._hwnd)
-        enable_native_resize(api_obj._hwnd, persona)
+        apply_dwm_tweaks(api_obj._hwnd)
 
         # Apply saved settings
         try:

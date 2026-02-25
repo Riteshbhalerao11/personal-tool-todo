@@ -842,8 +842,74 @@ function savePosition() {
     api('save_position', window.screenX, window.screenY, window.outerWidth, window.outerHeight);
 }
 
-// ---- Resize is handled natively via Win32 WS_THICKFRAME (see widget.pyw) ----
+// ---- Window resize handles ----
+
+function setupResizeHandles() {
+    const directions = ['n', 's', 'e', 'w', 'nw', 'ne', 'sw', 'se'];
+    const MIN_W = 280, MIN_H = 320;
+
+    directions.forEach(dir => {
+        const el = document.createElement('div');
+        el.className = 'resize-handle resize-' + dir;
+        document.body.appendChild(el);
+
+        let startX, startY, startWinX, startWinY, startW, startH, rafId;
+        const needsMove = dir.includes('n') || dir.includes('w');
+
+        el.addEventListener('pointerdown', async (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            el.setPointerCapture(e.pointerId);
+            startX = e.screenX;
+            startY = e.screenY;
+            // Use actual Win32 rect to avoid DPI mismatch
+            const rect = await pywebview.api.get_window_rect();
+            if (rect) {
+                startWinX = rect.x;
+                startWinY = rect.y;
+                startW = rect.w;
+                startH = rect.h;
+            }
+        });
+
+        el.addEventListener('pointermove', (e) => {
+            if (!el.hasPointerCapture(e.pointerId)) return;
+            if (startW == null) return; // rect not yet loaded
+            if (rafId) return; // throttle to one rAF at a time
+
+            const sx = e.screenX, sy = e.screenY;
+            rafId = requestAnimationFrame(() => {
+                rafId = null;
+                const dx = sx - startX;
+                const dy = sy - startY;
+
+                let x = startWinX, y = startWinY, w = startW, h = startH;
+
+                if (dir.includes('e')) w = Math.max(MIN_W, startW + dx);
+                if (dir.includes('w')) { w = Math.max(MIN_W, startW - dx); x = startWinX + startW - w; }
+                if (dir.includes('s')) h = Math.max(MIN_H, startH + dy);
+                if (dir.includes('n')) { h = Math.max(MIN_H, startH - dy); y = startWinY + startH - h; }
+
+                if (needsMove) {
+                    pywebview.api.move_and_resize(x, y, w, h);
+                } else {
+                    pywebview.api.resize_window(w, h);
+                }
+            });
+        });
+
+        el.addEventListener('pointerup', (e) => {
+            if (el.hasPointerCapture(e.pointerId)) {
+                el.releasePointerCapture(e.pointerId);
+            }
+            startW = null;
+        });
+    });
+}
 
 // ---- Start ----
 
-window.addEventListener('pywebviewready', init);
+window.addEventListener('pywebviewready', () => {
+    setupResizeHandles();
+    init();
+});

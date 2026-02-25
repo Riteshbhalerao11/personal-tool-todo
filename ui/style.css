@@ -1060,3 +1060,18 @@ body {
     padding: 10px 0 6px;
     font-family: 'Segoe UI', sans-serif;
 }
+
+/* ---- Resize handles ---- */
+.resize-handle {
+    position: fixed;
+    z-index: 9999;
+    background: transparent;
+}
+.resize-n  { top: 0; left: 8px; right: 8px; height: 6px; cursor: n-resize; }
+.resize-s  { bottom: 0; left: 8px; right: 8px; height: 6px; cursor: s-resize; }
+.resize-e  { right: 0; top: 8px; bottom: 8px; width: 6px; cursor: e-resize; }
+.resize-w  { left: 0; top: 8px; bottom: 8px; width: 6px; cursor: w-resize; }
+.resize-nw { top: 0; left: 0; width: 8px; height: 8px; cursor: nw-resize; }
+.resize-ne { top: 0; right: 0; width: 8px; height: 8px; cursor: ne-resize; }
+.resize-sw { bottom: 0; left: 0; width: 8px; height: 8px; cursor: sw-resize; }
+.resize-se { bottom: 0; right: 0; width: 8px; height: 8px; cursor: se-resize; }
