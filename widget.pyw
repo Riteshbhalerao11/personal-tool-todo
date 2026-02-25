@@ -25,7 +25,7 @@ from lib.markdown_io import (
     read_todo_sections, write_todo_file, write_honey_pot_file,
 )
 from lib.streak import update_streak, get_streak_display
-from lib.quotes import get_daily_quote, get_time_greeting
+from lib.quotes import get_daily_quote, get_time_greeting, get_poem_of_day
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -34,8 +34,10 @@ FIREBASE_URL = 'https://todo-app-acd7b-default-rtdb.firebaseio.com'
 
 # Win32 constants
 GWL_EXSTYLE = -20
+GWL_STYLE = -16
 WS_EX_TOOLWINDOW = 0x00000080
 WS_EX_APPWINDOW = 0x00040000
+WS_THICKFRAME = 0x00040000
 
 
 def find_hwnd_by_pid(pid):
@@ -67,6 +69,41 @@ def hide_from_taskbar(hwnd):
     # Toggle visibility to apply
     user32.ShowWindow(hwnd, 0)  # SW_HIDE
     user32.ShowWindow(hwnd, 5)  # SW_SHOW
+
+
+def enable_native_resize(hwnd, persona='ritesh'):
+    """Add native resize borders to frameless window with matching border color."""
+    if not hwnd:
+        return
+    user32 = ctypes.windll.user32
+
+    # Add WS_THICKFRAME for native resize borders
+    style = user32.GetWindowLongW(hwnd, GWL_STYLE)
+    style |= WS_THICKFRAME
+    user32.SetWindowLongW(hwnd, GWL_STYLE, style)
+
+    # Hide the DWM border entirely (Windows 11+)
+    try:
+        dwmapi = ctypes.windll.dwmapi
+        DWMWA_BORDER_COLOR = 34
+        DWMWA_COLOR_NONE = 0xFFFFFFFE
+        color = ctypes.c_uint(DWMWA_COLOR_NONE)
+        dwmapi.DwmSetWindowAttribute(
+            hwnd, DWMWA_BORDER_COLOR,
+            ctypes.byref(color), ctypes.sizeof(color)
+        )
+    except Exception:
+        pass
+
+    # Force Windows to recalculate the frame
+    SWP_FRAMECHANGED = 0x0020
+    SWP_NOMOVE = 0x0002
+    SWP_NOSIZE = 0x0001
+    SWP_NOZORDER = 0x0004
+    user32.SetWindowPos(
+        hwnd, None, 0, 0, 0, 0,
+        SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER
+    )
 
 
 class Api:
@@ -179,6 +216,15 @@ class Api:
         self._sync_todos()
         return get_today_items()
 
+    def open_url(self, url):
+        """Open a URL in the default system browser."""
+        import webbrowser
+        webbrowser.open(url)
+
+    def get_poem_of_day(self):
+        """Return today's poem (cached for the day)."""
+        return get_poem_of_day()
+
     def get_streak_data(self):
         return {
             'info': update_streak(),
@@ -214,8 +260,14 @@ class Api:
             self._window.resize(int(w), int(h))
 
     def move_and_resize(self, x, y, w, h):
-        """Move + resize in one call for left/top edge dragging."""
-        if self._window:
+        """Atomic move+resize using SetWindowPos to avoid flicker."""
+        hwnd = getattr(self, '_hwnd', None)
+        if hwnd:
+            SWP_NOZORDER = 0x0004
+            ctypes.windll.user32.SetWindowPos(
+                hwnd, None, int(x), int(y), int(w), int(h), SWP_NOZORDER
+            )
+        elif self._window:
             self._window.move(int(x), int(y))
             self._window.resize(int(w), int(h))
 
@@ -746,6 +798,7 @@ def main():
         time.sleep(0.5)
         api_obj._hwnd = find_hwnd_by_pid(os.getpid())
         hide_from_taskbar(api_obj._hwnd)
+        enable_native_resize(api_obj._hwnd, persona)
 
         # Apply saved settings
         try:

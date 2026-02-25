@@ -7,20 +7,11 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Resize handles for frameless window (all sides + corners) -->
-    <div class="resize-handle resize-handle-top" data-resize="top"></div>
-    <div class="resize-handle resize-handle-bottom" data-resize="bottom"></div>
-    <div class="resize-handle resize-handle-left" data-resize="left"></div>
-    <div class="resize-handle resize-handle-right" data-resize="right"></div>
-    <div class="resize-handle resize-handle-top-left" data-resize="top-left"></div>
-    <div class="resize-handle resize-handle-top-right" data-resize="top-right"></div>
-    <div class="resize-handle resize-handle-bottom-left" data-resize="bottom-left"></div>
-    <div class="resize-handle resize-handle-bottom-right" data-resize="bottom-right"></div>
-
     <div class="sticky-note">
         <div class="header pywebview-drag-region">
             <span class="title" id="widget-title">My Todos</span>
             <div class="header-controls">
+                <button class="header-icon-btn poem-btn" id="poem-btn" onclick="togglePoemView()" title="Poem of the Day">&#x1F4DC;</button>
                 <button class="honey-pot-toggle" id="honey-toggle" onclick="toggleHoneyPot()" title="Honey Pot">&#x1F36F;</button>
                 <button class="header-icon-btn" id="toggle-input-btn" onclick="toggleInputArea()" title="Toggle input">&#x270F;</button>
                 <button class="header-icon-btn" id="clear-btn" onclick="clearAllTodos()" title="Clear all">&#x2715;</button>
@@ -145,6 +136,25 @@
                     </div>
                 </div>
                 <div class="settings-info" id="settings-info"></div>
+            </div>
+        </div>
+
+        <!-- Poem of the Day overlay -->
+        <div class="poem-overlay" id="poem-overlay">
+            <div class="poem-header pywebview-drag-region">
+                <div class="poem-font-controls">
+                    <button class="poem-font-btn" onclick="changePoemFontSize(-1)" title="Smaller">-</button>
+                    <button class="poem-font-btn" onclick="changePoemFontSize(1)" title="Larger">+</button>
+                </div>
+                <button class="poem-close-btn" onclick="togglePoemView()">&times;</button>
+            </div>
+            <div class="poem-body" id="poem-body">
+                <div class="poem-loading" id="poem-loading">fetching today's poem...</div>
+                <div class="poem-content" id="poem-content" style="display:none">
+                    <div class="poem-title" id="poem-title"></div>
+                    <div class="poem-author" id="poem-author"></div>
+                    <div class="poem-lines" id="poem-lines"></div>
+                </div>
             </div>
         </div>
     </div>

@@ -1,90 +1,147 @@
-"""Daily quote fetching from ZenQuotes API with offline fallback."""
+"""Quote rotation (3/day via ZenQuotes) + Poem of the Day (PoetryDB)."""
 
-import urllib.request
-import json
 import random
+import re
 from datetime import datetime
 
-
-FALLBACK_QUOTES = [
-    {"text": "Imagination is more important than knowledge. Knowledge is limited. Imagination encircles the world.", "author": "Albert Einstein"},
-    {"text": "Life is like riding a bicycle. To keep your balance, you must keep moving.", "author": "Albert Einstein"},
-    {"text": "In the middle of difficulty lies opportunity.", "author": "Albert Einstein"},
-    {"text": "Logic will get you from A to B. Imagination will take you everywhere.", "author": "Albert Einstein"},
-    {"text": "Creativity is the greatest rebellion in existence.", "author": "Osho"},
-    {"text": "Experience life in all possible ways - good-bad, bitter-sweet, dark-light. Experience all the dualities.", "author": "Osho"},
-    {"text": "Be realistic: plan for a miracle.", "author": "Osho"},
-    {"text": "The moment you accept yourself, you become beautiful.", "author": "Osho"},
-    {"text": "Yesterday I was clever, so I wanted to change the world. Today I am wise, so I am changing myself.", "author": "Rumi"},
-    {"text": "The wound is the place where the light enters you.", "author": "Rumi"},
-    {"text": "What you seek is seeking you.", "author": "Rumi"},
-    {"text": "Silence is the language of God, all else is poor translation.", "author": "Rumi"},
-    {"text": "The first principle is that you must not fool yourself - and you are the easiest person to fool.", "author": "Richard Feynman"},
-    {"text": "Nobody ever figures out what life is all about, and it doesn't matter. Explore the world.", "author": "Richard Feynman"},
-    {"text": "The present is theirs; the future, for which I really worked, is mine.", "author": "Nikola Tesla"},
-    {"text": "You have power over your mind - not outside events. Realize this, and you will find strength.", "author": "Marcus Aurelius"},
-    {"text": "The happiness of your life depends upon the quality of your thoughts.", "author": "Marcus Aurelius"},
-    {"text": "Waste no more time arguing about what a good man should be. Be one.", "author": "Marcus Aurelius"},
-    {"text": "It is not that we have a short time to live, but that we waste a great deal of it.", "author": "Seneca"},
-    {"text": "We suffer more often in imagination than in reality.", "author": "Seneca"},
-    {"text": "The only way to make sense out of change is to plunge into it, move with it, and join the dance.", "author": "Alan Watts"},
-    {"text": "This is the real secret of life - to be completely engaged with what you are doing in the here and now.", "author": "Alan Watts"},
-    {"text": "A journey of a thousand miles begins with a single step.", "author": "Lao Tzu"},
-    {"text": "Nature does not hurry, yet everything is accomplished.", "author": "Lao Tzu"},
-    {"text": "When I let go of what I am, I become what I might be.", "author": "Lao Tzu"},
-    {"text": "Somewhere, something incredible is waiting to be known.", "author": "Carl Sagan"},
-    {"text": "We are a way for the cosmos to know itself.", "author": "Carl Sagan"},
-    {"text": "He who has a why to live can bear almost any how.", "author": "Friedrich Nietzsche"},
-    {"text": "One must still have chaos in oneself to be able to give birth to a dancing star.", "author": "Friedrich Nietzsche"},
-    {"text": "The unexamined life is not worth living.", "author": "Socrates"},
-    {"text": "Knowing yourself is the beginning of all wisdom.", "author": "Aristotle"},
-    {"text": "No man is free who is not master of himself.", "author": "Epictetus"},
-    {"text": "The mind is everything. What you think you become.", "author": "Buddha"},
-    {"text": "Do not dwell in the past, do not dream of the future, concentrate the mind on the present moment.", "author": "Buddha"},
-]
+import requests
 
 
-def fetch_quote_from_api():
-    """Fetch today's quote from ZenQuotes API."""
+ZENQUOTES_URL = "https://zenquotes.io/api/quotes"
+POETRYDB_RANDOM_URL = "https://poetrydb.org/random/10"
+POEMHUNTER_BASE = "https://www.poemhunter.com/poem/"
+
+
+def get_current_period():
+    """Return current period: 'morning' (00-08), 'day' (08-16), 'evening' (16-24)."""
+    hour = datetime.now().hour
+    if hour < 8:
+        return 'morning'
+    elif hour < 16:
+        return 'day'
+    else:
+        return 'evening'
+
+
+def _slugify(title):
+    """Convert a poem title into a PoemHunter URL slug."""
+    slug = title.lower().strip()
+    slug = re.sub(r'[^a-z0-9\s-]', '', slug)
+    slug = re.sub(r'[\s]+', '-', slug)
+    slug = re.sub(r'-+', '-', slug)
+    return slug.strip('-')
+
+
+def _fetch_zenquotes():
+    """Fetch ~50 quotes from ZenQuotes API."""
     try:
-        req = urllib.request.Request(
-            'https://zenquotes.io/api/today',
-            headers={'User-Agent': 'TodoWidget/1.0'}
-        )
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            data = json.loads(resp.read().decode())
-            if data and isinstance(data, list) and len(data) > 0:
-                q = data[0]
-                return {'text': q.get('q', ''), 'author': q.get('a', 'Unknown')}
+        resp = requests.get(ZENQUOTES_URL, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        return [
+            {"text": q["q"], "author": q["a"]}
+            for q in data
+            if q.get("q") and q.get("a") and q["a"] != "zenquotes.io"
+        ]
+    except Exception:
+        return None
+
+
+def fetch_poem_of_day():
+    """Fetch a poem from PoetryDB, picking one with a displayable length (5-60 lines)."""
+    try:
+        resp = requests.get(POETRYDB_RANDOM_URL, timeout=10)
+        resp.raise_for_status()
+        data = resp.json()
+        # Pick a poem with reasonable length for display
+        for p in data:
+            lines = p.get("lines", [])
+            if 5 <= len(lines) <= 60 and p.get("title") and p.get("author"):
+                slug = _slugify(p["title"])
+                return {
+                    "title": p["title"],
+                    "author": p["author"],
+                    "lines": lines,
+                    "url": f"{POEMHUNTER_BASE}{slug}/",
+                }
+        # If no poem in the sweet spot, take the shortest one > 2 lines
+        candidates = [p for p in data if len(p.get("lines", [])) > 2
+                       and p.get("title") and p.get("author")]
+        if candidates:
+            best = min(candidates, key=lambda p: len(p["lines"]))
+            slug = _slugify(best["title"])
+            return {
+                "title": best["title"],
+                "author": best["author"],
+                "lines": best["lines"][:60],
+                "url": f"{POEMHUNTER_BASE}{slug}/",
+            }
     except Exception:
         pass
     return None
 
 
 def get_daily_quote():
-    """Get today's quote. Uses cache, then API, then fallback."""
+    """Get quote for current time period. Changes 3 times a day."""
+    from lib.markdown_io import read_tracker, save_tracker
+
+    tracker = read_tracker()
+    today = datetime.now().strftime('%Y-%m-%d')
+    period = get_current_period()
+    cache_key = f"{today}_{period}"
+
+    # Return cached quote if it matches current period
+    if tracker.get('quotePeriodKey') == cache_key and tracker.get('periodQuote'):
+        return tracker['periodQuote']
+
+    # --- Quotes pool ---
+    quotes_pool = tracker.get('quotesPool', [])
+    if len(quotes_pool) < 3 or tracker.get('quotesPoolDate') != today:
+        new_quotes = _fetch_zenquotes()
+        if new_quotes:
+            quotes_pool = new_quotes
+            tracker['quotesPool'] = quotes_pool
+            tracker['quotesPoolDate'] = today
+
+    # Select from pool using seeded random (deterministic per period)
+    rng = random.Random(cache_key)
+    if quotes_pool:
+        quote = rng.choice(quotes_pool)
+    else:
+        quote = {"text": "The best time to plant a tree was 20 years ago. The second best time is now.", "author": "Chinese Proverb"}
+
+    result = {"text": quote["text"], "author": quote["author"]}
+
+    # Cache it
+    tracker['periodQuote'] = result
+    tracker['quotePeriodKey'] = cache_key
+    # Clean up old cache keys from previous versions
+    tracker.pop('todayQuote', None)
+    tracker.pop('todayQuoteDate', None)
+    tracker.pop('poetryPool', None)
+    tracker.pop('poetryPoolDate', None)
+    save_tracker(tracker)
+
+    return result
+
+
+def get_poem_of_day():
+    """Get poem of the day, cached for the whole day."""
     from lib.markdown_io import read_tracker, save_tracker
 
     tracker = read_tracker()
     today = datetime.now().strftime('%Y-%m-%d')
 
-    # Return cached quote if it's from today
-    if tracker.get('todayQuoteDate') == today and tracker.get('todayQuote'):
-        return tracker['todayQuote']
+    if tracker.get('poemOfDayDate') == today and tracker.get('poemOfDay'):
+        return tracker['poemOfDay']
 
-    # Try API
-    quote = fetch_quote_from_api()
+    poem = fetch_poem_of_day()
+    if poem:
+        tracker['poemOfDay'] = poem
+        tracker['poemOfDayDate'] = today
+        save_tracker(tracker)
 
-    # Fallback to local collection
-    if not quote:
-        quote = random.choice(FALLBACK_QUOTES)
-
-    # Cache it
-    tracker['todayQuote'] = quote
-    tracker['todayQuoteDate'] = today
-    save_tracker(tracker)
-
-    return quote
+    return poem
 
 
 def get_time_greeting():

@@ -11,6 +11,7 @@ let quoteCollapsed = false;
 let settingsOpen = false;
 let inputDepth = 0;
 let isEditingHoneyMsg = false;
+let poemViewOpen = false;
 
 // ---- Pywebview bridge ----
 
@@ -43,12 +44,17 @@ async function init() {
     document.getElementById('streak-text').textContent = data.streak_display;
     document.getElementById('greeting-text').textContent = data.greeting;
 
-    if (data.quote) {
-        document.getElementById('quote-text').textContent = '"' + data.quote.text + '"';
-        document.getElementById('quote-author').textContent = '- ' + data.quote.author;
-    }
+    renderQuote(data.quote);
 
     renderTodos(data.items);
+}
+
+// ---- Quote rendering ----
+
+function renderQuote(quote) {
+    if (!quote) return;
+    document.getElementById('quote-text').textContent = '"' + quote.text + '"';
+    document.getElementById('quote-author').textContent = '- ' + quote.author;
 }
 
 // ---- Separate collapse toggles ----
@@ -231,6 +237,26 @@ function renderTodos(items) {
                 if (newDepth !== curDepth) {
                     const items = await api('set_todo_depth', index, newDepth);
                     if (items) renderTodos(items);
+                }
+            }
+            // ArrowDown = create child subtask
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                // Save any pending edits first
+                const curText = htmlToMd(span.innerHTML);
+                if (curText !== item.text) {
+                    await api('update_todo_text', index, curText);
+                }
+                const curDepth = parseInt(span.dataset.depth) || 0;
+                const childDepth = Math.min(3, curDepth + 1);
+                const items = await api('insert_todo_after', index, '', childDepth);
+                if (items) {
+                    renderTodos(items);
+                    // Focus the newly created child item
+                    requestAnimationFrame(() => {
+                        const newSpan = document.querySelector(`.todo-text[data-index="${index + 1}"]`);
+                        if (newSpan) newSpan.focus();
+                    });
                 }
             }
         });
@@ -647,6 +673,7 @@ async function manualRefresh() {
         if (data) {
             document.getElementById('streak-text').textContent = data.streak_display;
             document.getElementById('greeting-text').textContent = data.greeting;
+            renderQuote(data.quote);
             renderTodos(data.items);
         }
     }
@@ -711,6 +738,54 @@ async function closeWidget() {
     await api('close_widget');
 }
 
+// ---- Poem of the Day ----
+
+let poemFontSize = 15;
+
+function changePoemFontSize(delta) {
+    poemFontSize = Math.max(11, Math.min(26, poemFontSize + delta));
+    document.getElementById('poem-content').style.fontSize = poemFontSize + 'px';
+}
+
+async function togglePoemView() {
+    poemViewOpen = !poemViewOpen;
+    const overlay = document.getElementById('poem-overlay');
+    const btn = document.getElementById('poem-btn');
+
+    if (poemViewOpen) {
+        overlay.classList.add('open');
+        btn.classList.add('active');
+        // Show loading, hide content
+        document.getElementById('poem-loading').style.display = '';
+        document.getElementById('poem-content').style.display = 'none';
+        const poem = await api('get_poem_of_day');
+        if (poem) {
+            renderPoem(poem);
+        } else {
+            document.getElementById('poem-loading').textContent = 'could not fetch a poem right now...';
+        }
+    } else {
+        overlay.classList.remove('open');
+        btn.classList.remove('active');
+    }
+}
+
+function renderPoem(poem) {
+    document.getElementById('poem-loading').style.display = 'none';
+    document.getElementById('poem-content').style.display = '';
+
+    document.getElementById('poem-title').textContent = poem.title;
+    document.getElementById('poem-author').textContent = poem.author;
+
+    const linesEl = document.getElementById('poem-lines');
+    linesEl.innerHTML = '';
+    (poem.lines || []).forEach(line => {
+        const p = document.createElement('p');
+        p.textContent = line || '\u00A0';  // non-breaking space for blank lines
+        linesEl.appendChild(p);
+    });
+}
+
 // ---- Keyboard shortcuts ----
 
 document.addEventListener('keydown', (e) => {
@@ -767,73 +842,7 @@ function savePosition() {
     api('save_position', window.screenX, window.screenY, window.outerWidth, window.outerHeight);
 }
 
-// ---- Resize handles (frameless window, all sides) ----
-
-(function initResizeHandles() {
-    const MIN_W = 280, MIN_H = 320;
-    let resizing = false, startX, startY, startW, startH, startWinX, startWinY, edge;
-
-    document.querySelectorAll('.resize-handle').forEach(handle => {
-        handle.addEventListener('mousedown', (e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            resizing = true;
-            edge = handle.dataset.resize;
-            startX = e.screenX;
-            startY = e.screenY;
-            startW = window.outerWidth;
-            startH = window.outerHeight;
-            startWinX = window.screenX;
-            startWinY = window.screenY;
-        });
-    });
-
-    document.addEventListener('mousemove', (e) => {
-        if (!resizing) return;
-        const dx = e.screenX - startX;
-        const dy = e.screenY - startY;
-
-        let newW = startW, newH = startH;
-        let newX = startWinX, newY = startWinY;
-        let needsMove = false;
-
-        // Right edge: width grows with dx
-        if (edge === 'right' || edge === 'top-right' || edge === 'bottom-right') {
-            newW = Math.max(MIN_W, startW + dx);
-        }
-        // Left edge: width shrinks with dx, window moves right
-        if (edge === 'left' || edge === 'top-left' || edge === 'bottom-left') {
-            const clampedW = Math.max(MIN_W, startW - dx);
-            newX = startWinX + (startW - clampedW);
-            newW = clampedW;
-            needsMove = true;
-        }
-        // Bottom edge: height grows with dy
-        if (edge === 'bottom' || edge === 'bottom-left' || edge === 'bottom-right') {
-            newH = Math.max(MIN_H, startH + dy);
-        }
-        // Top edge: height shrinks with dy, window moves down
-        if (edge === 'top' || edge === 'top-left' || edge === 'top-right') {
-            const clampedH = Math.max(MIN_H, startH - dy);
-            newY = startWinY + (startH - clampedH);
-            newH = clampedH;
-            needsMove = true;
-        }
-
-        if (needsMove) {
-            api('move_and_resize', newX, newY, newW, newH);
-        } else {
-            api('resize_window', newW, newH);
-        }
-    });
-
-    document.addEventListener('mouseup', () => {
-        if (resizing) {
-            resizing = false;
-            savePosition();
-        }
-    });
-})();
+// ---- Resize is handled natively via Win32 WS_THICKFRAME (see widget.pyw) ----
 
 // ---- Start ----
 
