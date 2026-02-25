@@ -1,3 +1,5 @@
 __pycache__/
 *.pid
 widget-config.json
+.claude/
+widget_err.log
