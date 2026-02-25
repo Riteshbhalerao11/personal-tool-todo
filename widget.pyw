@@ -523,7 +523,7 @@ class Api:
 
     SETTINGS_DEFAULTS = {
         'remindersEnabled': True,
-        'reminderInterval': 60,
+        'reminderInterval': 10,
         'windowOpacity': 100,
     }
 
@@ -608,7 +608,7 @@ def reminder_loop(api_obj, tray_icon_ref):
             if not api_obj._honey_pot_mode:
                 tracker = read_tracker()
                 enabled = tracker.get('remindersEnabled', True)
-                interval_min = tracker.get('reminderInterval', 60)
+                interval_min = tracker.get('reminderInterval', 10)
 
                 if enabled:
                     items = get_today_items()
