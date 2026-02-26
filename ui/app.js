@@ -692,13 +692,9 @@ function exitHoneyPotView() {
     document.getElementById('todo-area').classList.remove('honeypot-bg');
 
     // Restore areas based on their individual toggle states
-    if (!quoteCollapsed) {
-        document.getElementById('streak-area').style.display = '';
-        document.getElementById('quote-area').style.display = '';
-    }
-    if (!inputCollapsed) {
-        document.getElementById('add-area').style.display = '';
-    }
+    document.getElementById('streak-area').style.display = quoteCollapsed ? 'none' : '';
+    document.getElementById('quote-area').style.display = quoteCollapsed ? 'none' : '';
+    document.getElementById('add-area').style.display = inputCollapsed ? 'none' : '';
 
     // Reload todos
     (async () => {
