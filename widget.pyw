@@ -111,6 +111,7 @@ class Api:
         self._suppress_fb_until = 0
         self._persona = persona
         self._honey_pot_mode = False
+        self._tray_hidden = False
 
         # Firebase setup (None if not configured)
         self._firebase = None
@@ -267,6 +268,7 @@ class Api:
 
     def minimize_to_tray(self):
         """Hide window to system tray."""
+        self._tray_hidden = True
         if self._window:
             self._window.hide()
 
@@ -655,6 +657,36 @@ def reminder_loop(api_obj, tray_icon_ref):
         time.sleep(300)  # poll every 5 minutes
 
 
+def desktop_persist_loop(api_obj, window):
+    """Keep widget visible on the desktop.
+
+    Detects when the window is minimized (e.g. Win+D / Show Desktop)
+    and restores it so it behaves like a desktop sticky note.
+    Other windows can freely cover it.
+    """
+    user32 = ctypes.windll.user32
+    SW_RESTORE = 9
+    time.sleep(2)  # wait for hwnd to be cached
+
+    while True:
+        time.sleep(0.5)
+        hwnd = api_obj._hwnd
+        if not hwnd:
+            continue
+        # Skip if user explicitly minimized to tray
+        if api_obj._honey_pot_mode:
+            continue
+        try:
+            if not user32.IsWindowVisible(hwnd) and not getattr(api_obj, '_tray_hidden', False):
+                # Window was hidden (e.g. Show Desktop) — restore it
+                user32.ShowWindow(hwnd, SW_RESTORE)
+            elif user32.IsIconic(hwnd):
+                # Window was minimized — restore it
+                user32.ShowWindow(hwnd, SW_RESTORE)
+        except Exception:
+            pass
+
+
 def file_watcher(api_obj, window):
     path = get_todo_path()
     honey_path = get_honey_pot_path()
@@ -759,6 +791,7 @@ def main():
     tray_ref = {'icon': None}
 
     def show_window(icon=None, item=None):
+        api_obj._tray_hidden = False
         window.show()
 
     def quit_app(icon=None, item=None):
@@ -805,6 +838,7 @@ def main():
         msg = ctypes.wintypes.MSG()
         while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
             if msg.message == WM_HOTKEY:
+                api_obj._tray_hidden = False
                 window.show()
                 # Bring to front
                 if api_obj._hwnd:
@@ -828,6 +862,12 @@ def main():
                 api_obj.set_window_opacity(opacity)
         except Exception:
             pass
+
+        # Desktop persistence (restores widget after Win+D / Show Desktop)
+        persist_thread = threading.Thread(
+            target=desktop_persist_loop, args=(api_obj, window), daemon=True
+        )
+        persist_thread.start()
 
         # File watcher (always runs - catches local edits)
         watcher = threading.Thread(
