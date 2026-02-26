@@ -3,6 +3,9 @@
 import os
 import re
 import json
+import threading
+
+_file_lock = threading.Lock()
 
 # --- Persona ---
 
@@ -176,7 +179,7 @@ def read_todo_sections(path=None):
             continue
 
         if current is not None:
-            m = re.match(r'^(\s*)-\s+\[([ xX])\]\s+(.+)$', line)
+            m = re.match(r'^(\s*)-\s+\[([ xX])\]\s*(.*)$', line)
             if m:
                 indent = len(m.group(1))
                 depth = indent // 2
@@ -224,122 +227,176 @@ def get_today_items():
 
 
 def add_todo_item(text, depth=0):
-    sections = read_todo_sections()
-    today = get_today_str()
+    with _file_lock:
+        sections = read_todo_sections()
+        today = get_today_str()
 
-    today_section = None
-    for s in sections:
-        if s['date'] == today:
-            today_section = s
-            break
+        today_section = None
+        for s in sections:
+            if s['date'] == today:
+                today_section = s
+                break
 
-    if not today_section:
-        today_section = {'date': today, 'items': []}
-        sections.insert(0, today_section)
+        if not today_section:
+            today_section = {'date': today, 'items': []}
+            sections.insert(0, today_section)
 
-    today_section['items'].append({'text': text, 'done': False, 'depth': depth})
-    write_todo_file(sections)
+        today_section['items'].append({'text': text, 'done': False, 'depth': depth})
+        write_todo_file(sections)
 
 
 def set_todo_done(date, index, done):
-    sections = read_todo_sections()
-    for s in sections:
-        if s['date'] != date or not (0 <= index < len(s['items'])):
-            continue
-        items = s['items']
-        item = items[index]
-        item_depth = item.get('depth', 0)
-        item['done'] = done
+    with _file_lock:
+        sections = read_todo_sections()
+        for s in sections:
+            if s['date'] != date or not (0 <= index < len(s['items'])):
+                continue
+            items = s['items']
+            item = items[index]
+            item_depth = item.get('depth', 0)
+            item['done'] = done
 
-        # Cascade to children: all deeper items immediately following
-        for j in range(index + 1, len(items)):
-            child_depth = items[j].get('depth', 0)
-            if child_depth <= item_depth:
-                break
-            items[j]['done'] = done
-
-        # Bubble up: if checking done, check if all siblings under parent are done
-        if done and item_depth > 0:
-            parent_idx = None
-            for j in range(index - 1, -1, -1):
-                if items[j].get('depth', 0) < item_depth:
-                    parent_idx = j
+            # Cascade to children: all deeper items immediately following
+            for j in range(index + 1, len(items)):
+                child_depth = items[j].get('depth', 0)
+                if child_depth <= item_depth:
                     break
-            if parent_idx is not None:
-                parent_depth = items[parent_idx].get('depth', 0)
-                all_children_done = True
-                for j in range(parent_idx + 1, len(items)):
-                    d = items[j].get('depth', 0)
-                    if d <= parent_depth:
-                        break
-                    if d == item_depth and not items[j]['done']:
-                        all_children_done = False
-                        break
-                if all_children_done:
-                    items[parent_idx]['done'] = True
+                items[j]['done'] = done
 
-        break
-    write_todo_file(sections)
+            # Bubble up: if checking done, check if all siblings under parent are done
+            if done and item_depth > 0:
+                parent_idx = None
+                for j in range(index - 1, -1, -1):
+                    if items[j].get('depth', 0) < item_depth:
+                        parent_idx = j
+                        break
+                if parent_idx is not None:
+                    parent_depth = items[parent_idx].get('depth', 0)
+                    all_children_done = True
+                    for j in range(parent_idx + 1, len(items)):
+                        d = items[j].get('depth', 0)
+                        if d <= parent_depth:
+                            break
+                        if d == item_depth and not items[j]['done']:
+                            all_children_done = False
+                            break
+                    if all_children_done:
+                        items[parent_idx]['done'] = True
+
+            break
+        write_todo_file(sections)
 
 
 def remove_todo_item(date, index):
-    sections = read_todo_sections()
-    for s in sections:
-        if s['date'] == date and 0 <= index < len(s['items']):
-            s['items'].pop(index)
-            break
-    write_todo_file(sections)
+    with _file_lock:
+        sections = read_todo_sections()
+        for s in sections:
+            if s['date'] == date and 0 <= index < len(s['items']):
+                s['items'].pop(index)
+                break
+        write_todo_file(sections)
 
 
 def update_todo_text(date, index, text):
-    sections = read_todo_sections()
-    for s in sections:
-        if s['date'] == date and 0 <= index < len(s['items']):
-            s['items'][index]['text'] = text
-            break
-    write_todo_file(sections)
+    with _file_lock:
+        sections = read_todo_sections()
+        for s in sections:
+            if s['date'] == date and 0 <= index < len(s['items']):
+                s['items'][index]['text'] = text
+                break
+        write_todo_file(sections)
 
 
 def clear_today_items(date):
-    sections = read_todo_sections()
-    for s in sections:
-        if s['date'] == date:
-            s['items'] = []
-            break
-    write_todo_file(sections)
+    with _file_lock:
+        sections = read_todo_sections()
+        for s in sections:
+            if s['date'] == date:
+                s['items'] = []
+                break
+        write_todo_file(sections)
+
+
+def set_today_items(date, items):
+    """Replace all items for a given date (used by undo)."""
+    with _file_lock:
+        sections = read_todo_sections()
+        found = False
+        for s in sections:
+            if s['date'] == date:
+                s['items'] = items
+                found = True
+                break
+        if not found:
+            sections.insert(0, {'date': date, 'items': items})
+        write_todo_file(sections)
 
 
 def set_todo_depth(date, index, depth):
-    sections = read_todo_sections()
-    for s in sections:
-        if s['date'] == date and 0 <= index < len(s['items']):
-            s['items'][index]['depth'] = max(0, min(3, depth))
-            break
-    write_todo_file(sections)
+    with _file_lock:
+        sections = read_todo_sections()
+        for s in sections:
+            if s['date'] == date and 0 <= index < len(s['items']):
+                s['items'][index]['depth'] = max(0, min(3, depth))
+                break
+        write_todo_file(sections)
 
 
 def reorder_todo_item(date, from_index, to_index):
-    sections = read_todo_sections()
-    for s in sections:
-        if s['date'] != date:
-            continue
-        items = s['items']
-        if not (0 <= from_index < len(items) and 0 <= to_index < len(items)):
+    with _file_lock:
+        sections = read_todo_sections()
+        for s in sections:
+            if s['date'] != date:
+                continue
+            items = s['items']
+            if not (0 <= from_index < len(items) and 0 <= to_index < len(items)):
+                break
+            item = items.pop(from_index)
+            items.insert(to_index, item)
             break
-        item = items.pop(from_index)
-        items.insert(to_index, item)
-        break
-    write_todo_file(sections)
+        write_todo_file(sections)
+
+
+def reorder_todo_group(date, from_index, to_index):
+    """Move a task and all its children as a group to a new position."""
+    with _file_lock:
+        sections = read_todo_sections()
+        for s in sections:
+            if s['date'] != date:
+                continue
+            items = s['items']
+            if not (0 <= from_index < len(items)):
+                break
+
+            # Collect the group: parent + all deeper children immediately following
+            parent_depth = items[from_index].get('depth', 0)
+            group_end = from_index + 1
+            while group_end < len(items) and items[group_end].get('depth', 0) > parent_depth:
+                group_end += 1
+            group = items[from_index:group_end]
+            del items[from_index:group_end]
+
+            # Adjust to_index after removal
+            if to_index > from_index:
+                to_index -= len(group)
+            to_index = max(0, min(len(items), to_index))
+
+            # Insert the group at the new position
+            for i, item in enumerate(group):
+                items.insert(to_index + i, item)
+            break
+        write_todo_file(sections)
 
 
 def insert_todo_item(date, after_index, text, depth=0):
-    sections = read_todo_sections()
-    for s in sections:
-        if s['date'] == date:
-            new_item = {'text': text, 'done': False, 'depth': max(0, min(3, depth))}
-            s['items'].insert(after_index + 1, new_item)
-            break
-    write_todo_file(sections)
+    with _file_lock:
+        sections = read_todo_sections()
+        for s in sections:
+            if s['date'] == date:
+                new_item = {'text': text, 'done': False, 'depth': max(0, min(3, depth))}
+                s['items'].insert(after_index + 1, new_item)
+                break
+        write_todo_file(sections)
 
 
 # --- Honey Pot ---
@@ -363,28 +420,32 @@ def read_honey_pot_messages():
 
 
 def add_honey_pot_message(text, from_persona):
-    messages = read_honey_pot_messages()
-    today = get_today_str()
-    messages.append({'text': text, 'from': from_persona, 'date': today})
-    write_honey_pot_file(messages)
+    with _file_lock:
+        messages = read_honey_pot_messages()
+        today = get_today_str()
+        messages.append({'text': text, 'from': from_persona, 'date': today})
+        write_honey_pot_file(messages)
 
 
 def update_honey_pot_message(index, text):
-    messages = read_honey_pot_messages()
-    if 0 <= index < len(messages):
-        messages[index]['text'] = text
-    write_honey_pot_file(messages)
+    with _file_lock:
+        messages = read_honey_pot_messages()
+        if 0 <= index < len(messages):
+            messages[index]['text'] = text
+        write_honey_pot_file(messages)
 
 
 def remove_honey_pot_message(index):
-    messages = read_honey_pot_messages()
-    if 0 <= index < len(messages):
-        messages.pop(index)
-    write_honey_pot_file(messages)
+    with _file_lock:
+        messages = read_honey_pot_messages()
+        if 0 <= index < len(messages):
+            messages.pop(index)
+        write_honey_pot_file(messages)
 
 
 def clear_honey_pot_messages():
-    write_honey_pot_file([])
+    with _file_lock:
+        write_honey_pot_file([])
 
 
 def write_honey_pot_file(messages, path=None):

@@ -12,6 +12,10 @@ let settingsOpen = false;
 let inputDepth = 0;
 let isEditingHoneyMsg = false;
 let poemViewOpen = false;
+let actionVersion = 0;
+let undoStack = [];
+let lastRenderedItems = [];
+const UNDO_MAX = 30;
 
 // ---- Pywebview bridge ----
 
@@ -46,7 +50,7 @@ async function init() {
 
     renderQuote(data.quote);
 
-    renderTodos(data.items);
+    renderTodos(data.items, true);
 }
 
 // ---- Quote rendering ----
@@ -123,8 +127,14 @@ function htmlToMd(html) {
 }
 
 let dragFromIndex = null;
+let dragGroupSize = 1;
 
-function renderTodos(items) {
+function renderTodos(items, skipUndo) {
+    if (!skipUndo && items && items.length >= 0) {
+        // Save current state to undo stack before rendering new state
+        pushUndo();
+    }
+    lastRenderedItems = items ? JSON.parse(JSON.stringify(items)) : [];
     const list = document.getElementById('todo-list');
     list.innerHTML = '';
 
@@ -160,21 +170,33 @@ function renderTodos(items) {
 
         row.addEventListener('dragstart', (e) => {
             dragFromIndex = index;
-            row.classList.add('dragging');
+            // Calculate group size: parent + all deeper children following it
+            dragGroupSize = 1;
+            const parentDepth = depth;
+            for (let k = index + 1; k < items.length; k++) {
+                if ((items[k].depth || 0) > parentDepth) dragGroupSize++;
+                else break;
+            }
+            // Apply dragging class to entire group
+            for (let k = 0; k < dragGroupSize; k++) {
+                const el = list.children[index + k];
+                if (el) el.classList.add('dragging');
+            }
             e.dataTransfer.effectAllowed = 'move';
         });
         row.addEventListener('dragend', () => {
             row.draggable = false;
-            row.classList.remove('dragging');
             dragFromIndex = null;
-            list.querySelectorAll('.drag-over-top, .drag-over-bottom').forEach(el => {
-                el.classList.remove('drag-over-top', 'drag-over-bottom');
+            list.querySelectorAll('.dragging, .drag-over-top, .drag-over-bottom').forEach(el => {
+                el.classList.remove('dragging', 'drag-over-top', 'drag-over-bottom');
             });
         });
         row.addEventListener('dragover', (e) => {
             e.preventDefault();
             e.dataTransfer.dropEffect = 'move';
-            if (dragFromIndex === null || dragFromIndex === index) return;
+            if (dragFromIndex === null) return;
+            // Don't allow dropping onto items within the dragged group
+            if (index >= dragFromIndex && index < dragFromIndex + dragGroupSize) return;
             const rect = row.getBoundingClientRect();
             const midY = rect.top + rect.height / 2;
             row.classList.toggle('drag-over-top', e.clientY < midY);
@@ -186,11 +208,11 @@ function renderTodos(items) {
         row.addEventListener('drop', async (e) => {
             e.preventDefault();
             row.classList.remove('drag-over-top', 'drag-over-bottom');
-            if (dragFromIndex === null || dragFromIndex === index) return;
+            if (dragFromIndex === null) return;
+            if (index >= dragFromIndex && index < dragFromIndex + dragGroupSize) return;
             const rect = row.getBoundingClientRect();
             const midY = rect.top + rect.height / 2;
-            let toIndex = e.clientY < midY ? index : index;
-            // Adjust: if dropping below the midpoint, insert after this item
+            let toIndex;
             if (e.clientY >= midY && dragFromIndex < index) {
                 toIndex = index;
             } else if (e.clientY >= midY && dragFromIndex > index) {
@@ -200,7 +222,9 @@ function renderTodos(items) {
             } else {
                 toIndex = index;
             }
-            const result = await api('reorder_todo', dragFromIndex, toIndex);
+            const myVersion = ++actionVersion;
+            const result = await api('reorder_todo_group', dragFromIndex, toIndex);
+            if (myVersion !== actionVersion) return;
             if (result) renderTodos(result);
             dragFromIndex = null;
         });
@@ -217,11 +241,22 @@ function renderTodos(items) {
         span.dataset.index = index;
         span.dataset.depth = depth;
 
-        span.addEventListener('blur', () => {
+        span.addEventListener('blur', async () => {
             const newText = htmlToMd(span.innerHTML);
-            if (newText !== item.text) {
-                api('update_todo_text', index, newText);
+            if (newText === item.text) return;
+            // Find current index by matching original text+depth (guards against stale index)
+            let currentIndex = -1;
+            for (let i = 0; i < lastRenderedItems.length; i++) {
+                if (lastRenderedItems[i].text === item.text && (lastRenderedItems[i].depth || 0) === depth) {
+                    currentIndex = i;
+                    break;
+                }
             }
+            if (currentIndex === -1) return; // item was deleted, drop silently
+            const myVersion = ++actionVersion;
+            const result = await api('update_todo_text', currentIndex, newText);
+            if (myVersion !== actionVersion) return;
+            if (result) renderTodos(result, true); // skipUndo for inline text edits
         });
 
         span.addEventListener('keydown', async (e) => {
@@ -235,21 +270,26 @@ function renderTodos(items) {
                 const curDepth = parseInt(span.dataset.depth) || 0;
                 const newDepth = e.shiftKey ? Math.max(0, curDepth - 1) : Math.min(3, curDepth + 1);
                 if (newDepth !== curDepth) {
+                    const myVersion = ++actionVersion;
                     const items = await api('set_todo_depth', index, newDepth);
+                    if (myVersion !== actionVersion) return;
                     if (items) renderTodos(items);
                 }
             }
             // ArrowDown = create child subtask
             if (e.key === 'ArrowDown') {
                 e.preventDefault();
+                const myVersion = ++actionVersion;
                 // Save any pending edits first
                 const curText = htmlToMd(span.innerHTML);
                 if (curText !== item.text) {
                     await api('update_todo_text', index, curText);
+                    if (myVersion !== actionVersion) return;
                 }
                 const curDepth = parseInt(span.dataset.depth) || 0;
                 const childDepth = Math.min(3, curDepth + 1);
                 const items = await api('insert_todo_after', index, '', childDepth);
+                if (myVersion !== actionVersion) return;
                 if (items) {
                     renderTodos(items);
                     // Focus the newly created child item
@@ -267,12 +307,110 @@ function renderTodos(items) {
         del.title = 'Delete';
         del.addEventListener('click', () => deleteTodo(index));
 
+        // Right-click context menu
+        row.addEventListener('contextmenu', (e) => {
+            e.preventDefault();
+            showContextMenu(e.clientX, e.clientY, index, depth);
+        });
+
         row.appendChild(handle);
         row.appendChild(cb);
         row.appendChild(span);
         row.appendChild(del);
         list.appendChild(row);
     });
+}
+
+// ---- Context Menu ----
+
+function showContextMenu(x, y, index, depth) {
+    hideContextMenu();
+    const menu = document.createElement('div');
+    menu.id = 'context-menu';
+
+    const addChildOption = document.createElement('div');
+    addChildOption.className = 'context-menu-item';
+    addChildOption.textContent = 'Add Child';
+    if (depth >= 3) {
+        addChildOption.classList.add('disabled');
+        addChildOption.title = 'Max depth reached';
+    }
+    addChildOption.addEventListener('click', async () => {
+        hideContextMenu();
+        if (depth >= 3) return;
+        const myVersion = ++actionVersion;
+        const childDepth = Math.min(3, depth + 1);
+        const items = await api('insert_todo_after', index, '', childDepth);
+        if (myVersion !== actionVersion) return;
+        if (items) {
+            renderTodos(items);
+            requestAnimationFrame(() => {
+                const newSpan = document.querySelector(`.todo-text[data-index="${index + 1}"]`);
+                if (newSpan) newSpan.focus();
+            });
+        }
+    });
+
+    const deleteOption = document.createElement('div');
+    deleteOption.className = 'context-menu-item danger';
+    deleteOption.textContent = 'Delete';
+    deleteOption.addEventListener('click', () => {
+        hideContextMenu();
+        deleteTodo(index);
+    });
+
+    menu.appendChild(addChildOption);
+    menu.appendChild(deleteOption);
+    document.body.appendChild(menu);
+
+    // Position: ensure it stays within viewport
+    const menuRect = menu.getBoundingClientRect();
+    if (x + menuRect.width > window.innerWidth) x = window.innerWidth - menuRect.width - 4;
+    if (y + menuRect.height > window.innerHeight) y = window.innerHeight - menuRect.height - 4;
+    menu.style.left = x + 'px';
+    menu.style.top = y + 'px';
+
+    // Close on click outside
+    setTimeout(() => {
+        document.addEventListener('mousedown', hideContextMenuOnOutside);
+    }, 0);
+}
+
+function hideContextMenu() {
+    const existing = document.getElementById('context-menu');
+    if (existing) existing.remove();
+    document.removeEventListener('mousedown', hideContextMenuOnOutside);
+}
+
+function hideContextMenuOnOutside(e) {
+    const menu = document.getElementById('context-menu');
+    if (menu && !menu.contains(e.target)) {
+        hideContextMenu();
+    }
+}
+
+// ---- Undo Stack ----
+
+function pushUndo() {
+    if (lastRenderedItems.length > 0 || undoStack.length === 0) {
+        undoStack.push(JSON.parse(JSON.stringify(lastRenderedItems)));
+        if (undoStack.length > UNDO_MAX) undoStack.shift();
+    }
+}
+
+async function undo() {
+    if (undoStack.length === 0 || honeyPotMode) return;
+    const prev = undoStack.pop();
+    const myVersion = ++actionVersion;
+    const items = await api('restore_todos', prev);
+    if (myVersion !== actionVersion) return;
+    if (items) renderTodos(items, true);
+
+    const streakData = await api('get_streak_data');
+    if (myVersion !== actionVersion) return;
+    if (streakData) {
+        document.getElementById('streak-text').textContent = streakData.display;
+    }
 }
 
 // ---- Actions ----
@@ -300,40 +438,51 @@ async function addTodo() {
     const text = htmlToMd(html);
     if (!text) return;
 
+    const myVersion = ++actionVersion;
     const items = inputDepth > 0
         ? await api('add_todo_at_depth', text, inputDepth)
         : await api('add_todo', text);
+    if (myVersion !== actionVersion) return;
     if (items) renderTodos(items);
     el.innerHTML = '';
     el.focus();
 
     const streakData = await api('get_streak_data');
+    if (myVersion !== actionVersion) return;
     if (streakData) {
         document.getElementById('streak-text').textContent = streakData.display;
     }
 }
 
 async function toggleTodo(index, done) {
+    const myVersion = ++actionVersion;
     const items = await api('toggle_todo', index, done);
+    if (myVersion !== actionVersion) return; // stale response, discard
     if (items) renderTodos(items);
 
     const streakData = await api('get_streak_data');
+    if (myVersion !== actionVersion) return;
     if (streakData) {
         document.getElementById('streak-text').textContent = streakData.display;
     }
 }
 
 async function deleteTodo(index) {
+    const myVersion = ++actionVersion;
     const items = await api('delete_todo', index);
+    if (myVersion !== actionVersion) return;
     if (items) renderTodos(items);
 }
 
 async function clearAllTodos() {
+    const myVersion = ++actionVersion;
     if (honeyPotMode) {
         const messages = await api('confirm_and_clear_honey_pot');
+        if (myVersion !== actionVersion) return;
         if (messages) renderHoneyPotMessages(messages);
     } else {
         const items = await api('confirm_and_clear_todos');
+        if (myVersion !== actionVersion) return;
         if (items) renderTodos(items);
     }
 }
@@ -556,7 +705,7 @@ function exitHoneyPotView() {
         const data = await api('get_initial_data');
         if (data) {
             document.getElementById('streak-text').textContent = data.streak_display;
-            renderTodos(data.items);
+            renderTodos(data.items, true);
         }
     })();
 }
@@ -600,12 +749,12 @@ function renderHoneyPotMessages(messages) {
         if (msg.from === 'ritesh' && currentPersona === 'ritesh') {
             text.contentEditable = 'true';
             text.addEventListener('focus', () => { isEditingHoneyMsg = true; });
-            text.addEventListener('blur', () => {
+            text.addEventListener('blur', async () => {
                 isEditingHoneyMsg = false;
                 const newText = htmlToMd(text.innerHTML);
-                if (newText !== msg.text) {
-                    api('update_honey_pot_msg', realIndex, newText);
-                }
+                if (newText === msg.text) return;
+                const result = await api('update_honey_pot_msg', realIndex, newText);
+                if (result) renderHoneyPotMessages(result);
             });
             text.addEventListener('keydown', (e) => {
                 if (e.key === 'Enter') {
@@ -674,7 +823,7 @@ async function manualRefresh() {
             document.getElementById('streak-text').textContent = data.streak_display;
             document.getElementById('greeting-text').textContent = data.greeting;
             renderQuote(data.quote);
-            renderTodos(data.items);
+            renderTodos(data.items, true);
         }
     }
 }
@@ -790,6 +939,7 @@ function renderPoem(poem) {
 
 document.addEventListener('keydown', (e) => {
     if (e.ctrlKey && !e.shiftKey && !e.altKey) {
+        if (e.key === 'z') { e.preventDefault(); undo(); return; }
         if (e.key === 'b') { e.preventDefault(); fmt('bold'); }
         if (e.key === 'i') { e.preventDefault(); fmt('italic'); }
         if (e.key === 'u') { e.preventDefault(); fmt('underline'); }
@@ -824,7 +974,8 @@ async function refreshFromFile() {
         const data = await api('get_initial_data');
         if (!data) return;
         document.getElementById('streak-text').textContent = data.streak_display;
-        renderTodos(data.items);
+        undoStack = []; // External changes invalidate undo history
+        renderTodos(data.items, true);
     } finally {
         isRefreshing = false;
     }

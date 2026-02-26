@@ -17,12 +17,13 @@ import pystray
 from lib.markdown_io import (
     init_folder, get_todo_path, get_today_items, add_todo_item,
     set_todo_done, remove_todo_item, update_todo_text, set_todo_depth,
-    reorder_todo_item, insert_todo_item,
-    clear_today_items, read_tracker, save_tracker, get_today_str,
-    set_persona, get_persona, get_honey_pot_path,
+    reorder_todo_item, reorder_todo_group, insert_todo_item,
+    clear_today_items, set_today_items, read_tracker, save_tracker,
+    get_today_str, set_persona, get_persona, get_honey_pot_path,
     read_honey_pot_messages, add_honey_pot_message, update_honey_pot_message,
     remove_honey_pot_message, clear_honey_pot_messages,
     read_todo_sections, write_todo_file, write_honey_pot_file,
+    _file_lock,
 )
 from lib.streak import update_streak, get_streak_display
 from lib.quotes import get_daily_quote, get_time_greeting, get_poem_of_day
@@ -106,8 +107,8 @@ class Api:
         self._hwnd = None
         self._last_mtime = 0
         self._last_honey_mtime = 0
-        self._suppress_watch = False
-        self._suppress_fb_listen = False
+        self._suppress_watch_until = 0
+        self._suppress_fb_until = 0
         self._persona = persona
         self._honey_pot_mode = False
 
@@ -175,6 +176,7 @@ class Api:
         update_todo_text(get_today_str(), index, text)
         self._update_mtime()
         self._sync_todos()
+        return get_today_items()
 
     def confirm_and_clear_todos(self):
         # Native Windows message box (appears as a proper OS dialog)
@@ -204,8 +206,28 @@ class Api:
         self._sync_todos()
         return get_today_items()
 
+    def reorder_todo_group(self, from_index, to_index):
+        reorder_todo_group(get_today_str(), int(from_index), int(to_index))
+        self._update_mtime()
+        self._sync_todos()
+        return get_today_items()
+
     def insert_todo_after(self, index, text, depth):
         insert_todo_item(get_today_str(), int(index), str(text).strip(), max(0, min(3, int(depth))))
+        self._update_mtime()
+        self._sync_todos()
+        return get_today_items()
+
+    def restore_todos(self, items):
+        """Replace all today's items (used by undo)."""
+        sanitized = []
+        for item in (items or []):
+            sanitized.append({
+                'text': item.get('text', ''),
+                'done': bool(item.get('done', False)),
+                'depth': max(0, min(3, int(item.get('depth', 0)))),
+            })
+        set_today_items(get_today_str(), sanitized)
         self._update_mtime()
         self._sync_todos()
         return get_today_items()
@@ -297,6 +319,7 @@ class Api:
         update_honey_pot_message(index, text)
         self._update_honey_mtime()
         self._sync_honeypot()
+        return read_honey_pot_messages()
 
     def delete_honey_pot_msg(self, index):
         remove_honey_pot_message(index)
@@ -333,12 +356,10 @@ class Api:
             try:
                 today = get_today_str()
                 items = get_today_items()
-                self._suppress_fb_listen = True
+                self._suppress_fb_until = time.monotonic() + 2.0
                 self._firebase.push_today_todos(today, items)
-                time.sleep(1)
-                self._suppress_fb_listen = False
             except Exception:
-                self._suppress_fb_listen = False
+                pass
         threading.Thread(target=_push, daemon=True).start()
 
     def _sync_honeypot(self):
@@ -348,12 +369,10 @@ class Api:
         def _push():
             try:
                 messages = read_honey_pot_messages()
-                self._suppress_fb_listen = True
+                self._suppress_fb_until = time.monotonic() + 2.0
                 self._firebase.push_honeypot(messages)
-                time.sleep(1)
-                self._suppress_fb_listen = False
             except Exception:
-                self._suppress_fb_listen = False
+                pass
         threading.Thread(target=_push, daemon=True).start()
 
     def _sync_tracker(self):
@@ -376,7 +395,7 @@ class Api:
         # Listen for our own persona's todo path — changes from
         # the other machine (same persona) arrive here.
         def on_todo_change(event_data):
-            if self._suppress_fb_listen:
+            if time.monotonic() < self._suppress_fb_until:
                 return
             try:
                 # event_data is {'path': '...', 'data': ...}
@@ -398,30 +417,30 @@ class Api:
                             'depth': item.get('depth', 0),
                         })
 
-                # Update local file
-                sections = read_todo_sections()
-                found = False
-                for s in sections:
-                    if s['date'] == today:
-                        s['items'] = items
-                        found = True
-                        break
-                if not found:
-                    sections.insert(0, {'date': today, 'items': items})
+                # Update local file (under lock to prevent races)
+                with _file_lock:
+                    sections = read_todo_sections()
+                    found = False
+                    for s in sections:
+                        if s['date'] == today:
+                            s['items'] = items
+                            found = True
+                            break
+                    if not found:
+                        sections.insert(0, {'date': today, 'items': items})
 
-                self._suppress_watch = True
-                write_todo_file(sections)
-                self._last_mtime = os.path.getmtime(get_todo_path())
-                self._suppress_watch = False
+                    self._suppress_watch_until = time.monotonic() + 3.0
+                    write_todo_file(sections)
+                    self._last_mtime = os.path.getmtime(get_todo_path())
 
                 if self._window and not self._honey_pot_mode:
                     self._window.evaluate_js('refreshFromFile()')
             except Exception:
-                self._suppress_watch = False
+                pass
 
         # Listen for honeypot changes
         def on_honeypot_change(event_data):
-            if self._suppress_fb_listen:
+            if time.monotonic() < self._suppress_fb_until:
                 return
             try:
                 fb_messages = self._firebase.read("honeypot/messages")
@@ -439,15 +458,15 @@ class Api:
                             'date': msg.get('date', ''),
                         })
 
-                self._suppress_watch = True
-                write_honey_pot_file(messages)
-                self._last_honey_mtime = os.path.getmtime(get_honey_pot_path())
-                self._suppress_watch = False
+                with _file_lock:
+                    self._suppress_watch_until = time.monotonic() + 3.0
+                    write_honey_pot_file(messages)
+                    self._last_honey_mtime = os.path.getmtime(get_honey_pot_path())
 
                 if self._window and self._honey_pot_mode:
                     self._window.evaluate_js('refreshHoneyPot()')
             except Exception:
-                self._suppress_watch = False
+                pass
 
         self._firebase.listen(f"todos/{self._persona}", on_todo_change)
         self._firebase.listen("honeypot", on_honeypot_change)
@@ -485,37 +504,33 @@ class Api:
                         sections.insert(0, {'date': today, 'items': items})
 
                     if not found or items:
-                        self._suppress_watch = True
-                        write_todo_file(sections)
+                        self._suppress_watch_until = time.monotonic() + 3.0
+                        with _file_lock:
+                            write_todo_file(sections)
                         self._last_mtime = os.path.getmtime(get_todo_path())
-                        self._suppress_watch = False
 
                         if self._window and not self._honey_pot_mode:
                             self._window.evaluate_js('refreshFromFile()')
             except Exception:
-                self._suppress_watch = False
+                pass
 
             # Also push current local state to Firebase (in case we have newer data)
             try:
                 today = get_today_str()
                 items = get_today_items()
                 if items:
-                    self._suppress_fb_listen = True
+                    self._suppress_fb_until = time.monotonic() + 2.0
                     self._firebase.push_today_todos(today, items)
-                    time.sleep(1)
-                    self._suppress_fb_listen = False
             except Exception:
-                self._suppress_fb_listen = False
+                pass
 
             try:
                 messages = read_honey_pot_messages()
                 if messages:
-                    self._suppress_fb_listen = True
+                    self._suppress_fb_until = time.monotonic() + 2.0
                     self._firebase.push_honeypot(messages)
-                    time.sleep(1)
-                    self._suppress_fb_listen = False
             except Exception:
-                self._suppress_fb_listen = False
+                pass
 
         threading.Thread(target=_pull, daemon=True).start()
 
@@ -654,7 +669,7 @@ def file_watcher(api_obj, window):
 
     while True:
         time.sleep(2)
-        if api_obj._suppress_watch:
+        if time.monotonic() < api_obj._suppress_watch_until:
             continue
         try:
             mtime = os.path.getmtime(path)
