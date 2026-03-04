@@ -149,6 +149,17 @@ function renderTodos(items, skipUndo) {
         ];
         empty.textContent = messages[Math.floor(Math.random() * messages.length)];
         list.appendChild(empty);
+
+        const carryBtn = document.createElement('button');
+        carryBtn.className = 'carry-over-btn';
+        carryBtn.textContent = "Load yesterday's todos";
+        carryBtn.onclick = async () => {
+            const myVersion = ++actionVersion;
+            const newItems = await api('load_yesterday');
+            if (myVersion !== actionVersion) return;
+            if (newItems) renderTodos(newItems);
+        };
+        list.appendChild(carryBtn);
         return;
     }
 

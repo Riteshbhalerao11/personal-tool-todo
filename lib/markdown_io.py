@@ -226,6 +226,55 @@ def get_today_items():
     return []
 
 
+def get_previous_day_items():
+    """Return items from the most recent section before today (handles gaps)."""
+    sections = read_todo_sections()
+    today = get_today_str()
+    for s in sections:
+        if s['date'] < today:
+            return s['items']
+    return []
+
+
+def carry_over_yesterday():
+    """Copy all items from the most recent previous day into today, reset to unchecked."""
+    with _file_lock:
+        sections = read_todo_sections()
+        today = get_today_str()
+
+        # Don't carry over if today already has items
+        for s in sections:
+            if s['date'] == today and s['items']:
+                return
+
+        # Find most recent previous day
+        prev_items = None
+        for s in sections:
+            if s['date'] < today:
+                prev_items = s['items']
+                break
+
+        if not prev_items:
+            return
+
+        # Copy items, reset done status
+        new_items = [{'text': it['text'], 'done': False, 'depth': it.get('depth', 0)} for it in prev_items]
+
+        # Insert or update today's section
+        today_section = None
+        for s in sections:
+            if s['date'] == today:
+                today_section = s
+                break
+
+        if today_section:
+            today_section['items'] = new_items
+        else:
+            sections.insert(0, {'date': today, 'items': new_items})
+
+        write_todo_file(sections)
+
+
 def add_todo_item(text, depth=0):
     with _file_lock:
         sections = read_todo_sections()
@@ -395,6 +444,18 @@ def insert_todo_item(date, after_index, text, depth=0):
             if s['date'] == date:
                 new_item = {'text': text, 'done': False, 'depth': max(0, min(3, depth))}
                 s['items'].insert(after_index + 1, new_item)
+                # Unmark ancestors: a done parent can't have an incomplete child
+                items = s['items']
+                new_idx = after_index + 1
+                new_depth = new_item['depth']
+                if new_depth > 0:
+                    for j in range(new_idx - 1, -1, -1):
+                        if items[j].get('depth', 0) < new_depth:
+                            if items[j]['done']:
+                                items[j]['done'] = False
+                            new_depth = items[j].get('depth', 0)
+                            if new_depth == 0:
+                                break
                 break
         write_todo_file(sections)
 

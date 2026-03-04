@@ -204,8 +204,26 @@ body {
 .empty-state {
     text-align: center;
     color: var(--text-faint);
-    padding: 30px 10px;
+    padding: 30px 10px 10px;
     font-size: var(--ui-font-size);
+}
+
+.carry-over-btn {
+    display: block;
+    margin: 0 auto 15px;
+    padding: 6px 16px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    font-size: calc(var(--ui-font-size) - 1px);
+    cursor: pointer;
+    opacity: 0.85;
+    transition: opacity 0.15s;
+}
+
+.carry-over-btn:hover {
+    opacity: 1;
 }
 
 .todo-item {

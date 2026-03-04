@@ -15,7 +15,7 @@ from PIL import Image, ImageDraw
 import pystray
 
 from lib.markdown_io import (
-    init_folder, get_todo_path, get_today_items, add_todo_item,
+    init_folder, get_todo_path, get_today_items, carry_over_yesterday, add_todo_item,
     set_todo_done, remove_todo_item, update_todo_text, set_todo_depth,
     reorder_todo_item, reorder_todo_group, insert_todo_item,
     clear_today_items, set_today_items, read_tracker, save_tracker,
@@ -157,6 +157,12 @@ class Api:
 
     def add_todo_at_depth(self, text, depth):
         add_todo_item(text, depth=max(0, min(3, int(depth))))
+        self._update_mtime()
+        self._sync_todos()
+        return get_today_items()
+
+    def load_yesterday(self):
+        carry_over_yesterday()
         self._update_mtime()
         self._sync_todos()
         return get_today_items()
