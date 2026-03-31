@@ -459,8 +459,12 @@ def reorder_todo_item(date, from_index, to_index):
         write_todo_file(sections)
 
 
-def reorder_todo_group(date, from_index, to_index):
-    """Move a task and all its children as a group to a new position."""
+def reorder_todo_group(date, from_index, to_index, new_priority=None):
+    """Move a task and all its children as a group to a new position.
+
+    If new_priority is given, set the root item's priority (used when
+    dragging across priority groups).
+    """
     with _file_lock:
         sections = read_todo_sections()
         for s in sections:
@@ -477,6 +481,11 @@ def reorder_todo_group(date, from_index, to_index):
                 group_end += 1
             group = items[from_index:group_end]
             del items[from_index:group_end]
+
+            # Update priority of the root item if crossing groups
+            if new_priority is not None:
+                valid = ('none', 'high', 'medium', 'low')
+                group[0]['priority'] = new_priority if new_priority in valid else 'none'
 
             # Adjust to_index after removal
             if to_index > from_index:

@@ -220,8 +220,9 @@ class Api:
         self._sync_todos()
         return get_today_items()
 
-    def reorder_todo_group(self, from_index, to_index):
-        reorder_todo_group(get_today_str(), int(from_index), int(to_index))
+    def reorder_todo_group(self, from_index, to_index, new_priority=None):
+        reorder_todo_group(get_today_str(), int(from_index), int(to_index),
+                           new_priority=str(new_priority) if new_priority else None)
         self._update_mtime()
         self._sync_todos()
         return get_today_items()

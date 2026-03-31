@@ -253,8 +253,20 @@ function renderTodos(items, skipUndo) {
             } else {
                 toIndex = index;
             }
+            // Detect cross-priority drag: find target group's root priority
+            const fromPriority = items[dragFromIndex].priority || 'none';
+            let targetPriority = items[index].priority || 'none';
+            if ((items[index].depth || 0) > 0) {
+                for (let k = index - 1; k >= 0; k--) {
+                    if ((items[k].depth || 0) === 0) {
+                        targetPriority = items[k].priority || 'none';
+                        break;
+                    }
+                }
+            }
+            const newPriority = fromPriority !== targetPriority ? targetPriority : null;
             const myVersion = ++actionVersion;
-            const result = await api('reorder_todo_group', dragFromIndex, toIndex);
+            const result = await api('reorder_todo_group', dragFromIndex, toIndex, newPriority);
             if (myVersion !== actionVersion) return;
             if (result) renderTodos(result);
             dragFromIndex = null;
