@@ -185,12 +185,49 @@ def read_todo_sections(path=None):
                 depth = indent // 2
                 done = m.group(2) != ' '
                 text = m.group(3).strip()
-                current['items'].append({'text': text, 'done': done, 'depth': depth})
+                # Extract priority tag {p:high|medium|low}
+                priority = 'none'
+                pm = re.search(r'\s*\{p:(high|medium|low)\}\s*$', text)
+                if pm:
+                    priority = pm.group(1)
+                    text = text[:pm.start()].strip()
+                current['items'].append({'text': text, 'done': done, 'depth': depth, 'priority': priority})
 
     if current:
         sections.append(current)
 
     return sections
+
+
+_PRIORITY_ORDER = {'high': 0, 'medium': 1, 'low': 2, 'none': 3}
+
+
+def _sort_items_by_priority(items):
+    """Sort items by priority, keeping parent-child groups together."""
+    if not items:
+        return items
+
+    # Build groups: each group is a root (depth 0) item + its children
+    groups = []
+    current_group = None
+
+    for item in items:
+        depth = item.get('depth', 0)
+        if depth == 0:
+            current_group = [item]
+            groups.append(current_group)
+        elif current_group is not None:
+            current_group.append(item)
+        else:
+            # Orphan child — treat as its own group
+            current_group = [item]
+            groups.append(current_group)
+
+    # Stable sort groups by priority of root item
+    groups.sort(key=lambda g: _PRIORITY_ORDER.get(g[0].get('priority', 'none'), 3))
+
+    # Flatten back
+    return [item for group in groups for item in group]
 
 
 def write_todo_file(sections, path=None):
@@ -200,12 +237,15 @@ def write_todo_file(sections, path=None):
     title = "Riya's Todos" if _persona == 'riya' else 'My Todos'
     lines = [f'# {title}', '']
     for section in sections:
+        sorted_items = _sort_items_by_priority(section['items'])
         lines.append(f"## {section['date']}")
         lines.append('')
-        for item in section['items']:
+        for item in sorted_items:
             check = 'x' if item['done'] else ' '
             indent = '  ' * item.get('depth', 0)
-            lines.append(f"{indent}- [{check}] {item['text']}")
+            priority = item.get('priority', 'none')
+            ptag = f' {{p:{priority}}}' if priority and priority != 'none' else ''
+            lines.append(f"{indent}- [{check}] {item['text']}{ptag}")
         lines.append('')
 
     content = '\n'.join(lines).rstrip() + '\n'
@@ -258,7 +298,7 @@ def carry_over_yesterday():
             return
 
         # Copy items, reset done status
-        new_items = [{'text': it['text'], 'done': False, 'depth': it.get('depth', 0)} for it in prev_items]
+        new_items = [{'text': it['text'], 'done': False, 'depth': it.get('depth', 0), 'priority': it.get('priority', 'none')} for it in prev_items]
 
         # Insert or update today's section
         today_section = None
@@ -275,7 +315,7 @@ def carry_over_yesterday():
         write_todo_file(sections)
 
 
-def add_todo_item(text, depth=0):
+def add_todo_item(text, depth=0, priority='none'):
     with _file_lock:
         sections = read_todo_sections()
         today = get_today_str()
@@ -290,7 +330,7 @@ def add_todo_item(text, depth=0):
             today_section = {'date': today, 'items': []}
             sections.insert(0, today_section)
 
-        today_section['items'].append({'text': text, 'done': False, 'depth': depth})
+        today_section['items'].append({'text': text, 'done': False, 'depth': depth, 'priority': priority})
         write_todo_file(sections)
 
 
@@ -381,6 +421,19 @@ def set_today_items(date, items):
         write_todo_file(sections)
 
 
+def set_todo_priority(date, index, priority):
+    valid = ('none', 'high', 'medium', 'low')
+    if priority not in valid:
+        priority = 'none'
+    with _file_lock:
+        sections = read_todo_sections()
+        for s in sections:
+            if s['date'] == date and 0 <= index < len(s['items']):
+                s['items'][index]['priority'] = priority
+                break
+        write_todo_file(sections)
+
+
 def set_todo_depth(date, index, depth):
     with _file_lock:
         sections = read_todo_sections()
@@ -442,7 +495,7 @@ def insert_todo_item(date, after_index, text, depth=0):
         sections = read_todo_sections()
         for s in sections:
             if s['date'] == date:
-                new_item = {'text': text, 'done': False, 'depth': max(0, min(3, depth))}
+                new_item = {'text': text, 'done': False, 'depth': max(0, min(3, depth)), 'priority': 'none'}
                 s['items'].insert(after_index + 1, new_item)
                 # Unmark ancestors: a done parent can't have an incomplete child
                 items = s['items']

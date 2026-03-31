@@ -17,6 +17,7 @@ import pystray
 from lib.markdown_io import (
     init_folder, get_todo_path, get_today_items, carry_over_yesterday, add_todo_item,
     set_todo_done, remove_todo_item, update_todo_text, set_todo_depth,
+    set_todo_priority,
     reorder_todo_item, reorder_todo_group, insert_todo_item,
     clear_today_items, set_today_items, read_tracker, save_tracker,
     get_today_str, set_persona, get_persona, get_honey_pot_path,
@@ -207,6 +208,12 @@ class Api:
         self._sync_todos()
         return get_today_items()
 
+    def set_todo_priority(self, index, priority):
+        set_todo_priority(get_today_str(), int(index), str(priority))
+        self._update_mtime()
+        self._sync_todos()
+        return get_today_items()
+
     def reorder_todo(self, from_index, to_index):
         reorder_todo_item(get_today_str(), int(from_index), int(to_index))
         self._update_mtime()
@@ -229,10 +236,14 @@ class Api:
         """Replace all today's items (used by undo)."""
         sanitized = []
         for item in (items or []):
+            p = item.get('priority', 'none')
+            if p not in ('none', 'high', 'medium', 'low'):
+                p = 'none'
             sanitized.append({
                 'text': item.get('text', ''),
                 'done': bool(item.get('done', False)),
                 'depth': max(0, min(3, int(item.get('depth', 0)))),
+                'priority': p,
             })
         set_today_items(get_today_str(), sanitized)
         self._update_mtime()
@@ -423,6 +434,7 @@ class Api:
                             'text': item.get('text', ''),
                             'done': item.get('done', False),
                             'depth': item.get('depth', 0),
+                            'priority': item.get('priority', 'none'),
                         })
 
                 # Update local file (under lock to prevent races)

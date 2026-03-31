@@ -163,10 +163,30 @@ function renderTodos(items, skipUndo) {
         return;
     }
 
+    let lastPriorityGroup = null;
     items.forEach((item, index) => {
         const depth = item.depth || 0;
+        const priority = item.priority || 'none';
+
+        // Insert priority group divider when group changes (root items only)
+        if (depth === 0 && priority !== 'none' && priority !== lastPriorityGroup) {
+            lastPriorityGroup = priority;
+            const divider = document.createElement('div');
+            divider.className = 'priority-group-label priority-group-' + priority;
+            const labels = { high: 'High Priority', medium: 'Medium', low: 'Low' };
+            divider.textContent = labels[priority] || priority;
+            list.appendChild(divider);
+        } else if (depth === 0 && priority === 'none' && lastPriorityGroup !== null && lastPriorityGroup !== 'none') {
+            lastPriorityGroup = 'none';
+            // Subtle separator after the last priority group
+            const sep = document.createElement('div');
+            sep.className = 'priority-group-sep';
+            list.appendChild(sep);
+        }
+
         const row = document.createElement('div');
         row.className = 'todo-item' + (depth > 0 ? ' nested' : '');
+        if (priority !== 'none') row.classList.add('priority-' + priority);
         row.dataset.index = index;
         if (depth > 0) {
             row.style.paddingLeft = (depth * 20 + 4) + 'px';
@@ -238,6 +258,15 @@ function renderTodos(items, skipUndo) {
             if (myVersion !== actionVersion) return;
             if (result) renderTodos(result);
             dragFromIndex = null;
+        });
+
+        // Priority dot (click to cycle)
+        const dot = document.createElement('span');
+        dot.className = 'priority-dot' + (priority !== 'none' ? ' p-' + priority : '');
+        dot.title = priority === 'none' ? 'Set priority' : priority.charAt(0).toUpperCase() + priority.slice(1) + ' priority (click to change)';
+        dot.addEventListener('click', (e) => {
+            e.stopPropagation();
+            cyclePriority(index, priority);
         });
 
         const cb = document.createElement('input');
@@ -325,6 +354,7 @@ function renderTodos(items, skipUndo) {
         });
 
         row.appendChild(handle);
+        row.appendChild(dot);
         row.appendChild(cb);
         row.appendChild(span);
         row.appendChild(del);
@@ -338,6 +368,32 @@ function showContextMenu(x, y, index, depth) {
     hideContextMenu();
     const menu = document.createElement('div');
     menu.id = 'context-menu';
+
+    // Current priority from rendered items
+    const currentPriority = (lastRenderedItems[index] && lastRenderedItems[index].priority) || 'none';
+
+    // Priority options
+    const priorities = [
+        { key: 'high', label: 'High', dot: 'high' },
+        { key: 'medium', label: 'Medium', dot: 'medium' },
+        { key: 'low', label: 'Low', dot: 'low' },
+        { key: 'none', label: 'None', dot: 'none' },
+    ];
+    priorities.forEach(p => {
+        const opt = document.createElement('div');
+        opt.className = 'context-menu-item' + (currentPriority === p.key ? ' active-priority' : '');
+        opt.innerHTML = '<span class="priority-label"><span class="dot ' + p.dot + '"></span>' + p.label + '</span>';
+        opt.addEventListener('click', () => {
+            hideContextMenu();
+            setPriority(index, p.key);
+        });
+        menu.appendChild(opt);
+    });
+
+    // Divider
+    const divider = document.createElement('div');
+    divider.className = 'context-menu-divider';
+    menu.appendChild(divider);
 
     const addChildOption = document.createElement('div');
     addChildOption.className = 'context-menu-item';
@@ -481,6 +537,22 @@ async function toggleTodo(index, done) {
 async function deleteTodo(index) {
     const myVersion = ++actionVersion;
     const items = await api('delete_todo', index);
+    if (myVersion !== actionVersion) return;
+    if (items) renderTodos(items);
+}
+
+async function cyclePriority(index, current) {
+    const cycle = ['none', 'high', 'medium', 'low'];
+    const next = cycle[(cycle.indexOf(current) + 1) % cycle.length];
+    const myVersion = ++actionVersion;
+    const items = await api('set_todo_priority', index, next);
+    if (myVersion !== actionVersion) return;
+    if (items) renderTodos(items);
+}
+
+async function setPriority(index, priority) {
+    const myVersion = ++actionVersion;
+    const items = await api('set_todo_priority', index, priority);
     if (myVersion !== actionVersion) return;
     if (items) renderTodos(items);
 }
