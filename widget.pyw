@@ -508,6 +508,7 @@ class Api:
                                 'text': item.get('text', ''),
                                 'done': item.get('done', False),
                                 'depth': item.get('depth', 0),
+                                'priority': item.get('priority', 'none'),
                             })
 
                     sections = read_todo_sections()
