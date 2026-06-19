@@ -15,6 +15,7 @@ let poemViewOpen = false;
 let actionVersion = 0;
 let undoStack = [];
 let lastRenderedItems = [];
+let appPlatform = 'windows';   // 'windows' | 'mac' | 'linux'
 const UNDO_MAX = 30;
 
 // ---- Pywebview bridge ----
@@ -34,6 +35,7 @@ async function init() {
     if (!data) return;
 
     currentPersona = data.persona || 'ritesh';
+    appPlatform = data.platform || 'windows';
     todayDate = data.date;
     uiFontSize = data.uiFontSize || 14;
     todoFontSize = data.todoFontSize || 15;
@@ -1099,6 +1101,16 @@ function setupResizeHandles() {
         const needsMove = dir.includes('n') || dir.includes('w');
 
         el.addEventListener('pointerdown', async (e) => {
+            // Linux/Wayland: hand the resize to the compositor. Do NOT
+            // preventDefault/stopPropagation or capture the pointer here — that
+            // suppresses the GDK implicit grab that begin_resize_drag needs,
+            // which is what made resize require a second click. Mirror the
+            // (working) header move handler: just start the compositor resize.
+            if (appPlatform === 'linux') {
+                if (e.button !== 0) return;
+                pywebview.api.start_window_resize(dir, e.screenX, e.screenY);
+                return;
+            }
             e.preventDefault();
             e.stopPropagation();
             el.setPointerCapture(e.pointerId);
@@ -1149,9 +1161,25 @@ function setupResizeHandles() {
     });
 }
 
+// ---- Native window drag (Linux/Wayland) ----
+
+// On Linux the pywebview drag-region moves the window with absolute coords,
+// which Wayland ignores. Hand the move to the compositor via begin_move_drag.
+function setupNativeDrag() {
+    document.querySelectorAll('.pywebview-drag-region').forEach(el => {
+        el.addEventListener('pointerdown', (e) => {
+            if (appPlatform !== 'linux') return;        // Windows/mac: built-in drag works
+            if (e.button !== 0) return;                  // left button only
+            if (e.target.closest('button, input, textarea, a')) return;  // don't hijack controls
+            pywebview.api.start_window_move(e.screenX, e.screenY);
+        });
+    });
+}
+
 // ---- Start ----
 
 window.addEventListener('pywebviewready', () => {
     setupResizeHandles();
+    setupNativeDrag();
     init();
 });

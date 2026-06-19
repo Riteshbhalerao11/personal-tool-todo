@@ -2,18 +2,25 @@
 
 import os
 import sys
-import subprocess
 import threading
 import time
-import ctypes
-import ctypes.wintypes
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import webview
-from PIL import Image, ImageDraw
-import pystray
 
+# pystray + Pillow are OPTIONAL — they are only needed to draw the system-tray
+# icon. Pillow is heavy (~6 MB) and pystray pulls it in, so neither is a core
+# dependency. Without them the widget runs unchanged: reminders fall back to
+# plat.notify() and the window is shown via the SIGUSR1/hotkey listener.
+# pystray also selects its backend at import time; on Linux without an
+# AppIndicator typelib that import raises — so the except covers both cases.
+try:
+    import pystray
+except Exception:
+    pystray = None
+
+from lib import platform_compat as plat
 from lib.markdown_io import (
     init_folder, get_todo_path, get_today_items, carry_over_yesterday, add_todo_item,
     set_todo_done, remove_todo_item, update_todo_text, set_todo_depth,
@@ -34,72 +41,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 FIREBASE_URL = 'https://todo-app-acd7b-default-rtdb.firebaseio.com'
 
-# Win32 constants
-GWL_EXSTYLE = -20
-GWL_STYLE = -16
-WS_EX_TOOLWINDOW = 0x00000080
-WS_EX_APPWINDOW = 0x00040000
-
-
-def find_hwnd_by_pid(pid):
-    """Find the main visible window handle for a given PID."""
-    user32 = ctypes.windll.user32
-    result = []
-
-    WNDENUMPROC = ctypes.WINFUNCTYPE(ctypes.c_bool, ctypes.c_void_p, ctypes.c_void_p)
-
-    def callback(hwnd, _):
-        proc_id = ctypes.wintypes.DWORD()
-        user32.GetWindowThreadProcessId(hwnd, ctypes.byref(proc_id))
-        if proc_id.value == pid and user32.IsWindowVisible(hwnd):
-            result.append(hwnd)
-        return True
-
-    user32.EnumWindows(WNDENUMPROC(callback), 0)
-    return result[0] if result else None
-
-
-def hide_from_taskbar(hwnd):
-    """Use Win32 API to hide window from taskbar by setting WS_EX_TOOLWINDOW."""
-    if not hwnd:
-        return
-    user32 = ctypes.windll.user32
-    style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-    style = (style | WS_EX_TOOLWINDOW) & ~WS_EX_APPWINDOW
-    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
-    # Toggle visibility to apply
-    user32.ShowWindow(hwnd, 0)  # SW_HIDE
-    user32.ShowWindow(hwnd, 5)  # SW_SHOW
-
-
-def apply_dwm_tweaks(hwnd):
-    """Apply DWM visual tweaks (border hiding, rounded corners) on Windows 11+."""
-    if not hwnd:
-        return
-    # DWM tweaks (Windows 11+)
-    try:
-        dwmapi = ctypes.windll.dwmapi
-
-        # Hide the thin border line
-        DWMWA_BORDER_COLOR = 34
-        DWMWA_COLOR_NONE = 0xFFFFFFFE
-        color = ctypes.c_uint(DWMWA_COLOR_NONE)
-        dwmapi.DwmSetWindowAttribute(
-            hwnd, DWMWA_BORDER_COLOR,
-            ctypes.byref(color), ctypes.sizeof(color)
-        )
-
-        # Force rounded corners
-        DWMWA_WINDOW_CORNER_PREFERENCE = 33
-        DWMWCP_ROUND = 2
-        corner_pref = ctypes.c_int(DWMWCP_ROUND)
-        dwmapi.DwmSetWindowAttribute(
-            hwnd, DWMWA_WINDOW_CORNER_PREFERENCE,
-            ctypes.byref(corner_pref), ctypes.sizeof(corner_pref)
-        )
-
-    except Exception:
-        pass
+# Platform-specific window/OS behaviour lives in lib/platform_compat.py.
 
 
 class Api:
@@ -113,6 +55,7 @@ class Api:
         self._persona = persona
         self._honey_pot_mode = False
         self._tray_hidden = False
+        self._restarting = False
 
         # Firebase setup (None if not configured)
         self._firebase = None
@@ -141,6 +84,7 @@ class Api:
             'uiFontSize': tracker.get('uiFontSize', 14),
             'todoFontSize': tracker.get('todoFontSize', 15),
             'persona': self._persona,
+            'platform': 'windows' if plat.IS_WINDOWS else ('mac' if plat.IS_MAC else 'linux'),
         }
 
     def _update_mtime(self):
@@ -187,15 +131,11 @@ class Api:
         return get_today_items()
 
     def confirm_and_clear_todos(self):
-        # Native Windows message box (appears as a proper OS dialog)
-        MB_YESNO = 0x04
-        MB_ICONWARNING = 0x30
-        IDYES = 6
-        result = ctypes.windll.user32.MessageBoxW(
-            0, "Clear all todos for today? This cannot be undone.",
-            "Clear All", MB_YESNO | MB_ICONWARNING
-        )
-        if result != IDYES:
+        # Native OS confirmation dialog (MessageBoxW on Windows, pywebview elsewhere)
+        if not plat.confirm_dialog(
+            self._window, "Clear All",
+            "Clear all todos for today? This cannot be undone."
+        ):
             return None
         clear_today_items(get_today_str())
         self._update_mtime()
@@ -291,15 +231,8 @@ class Api:
             self._window.hide()
 
     def get_window_rect(self):
-        """Return the actual Win32 window rect {x, y, w, h} in physical pixels."""
-        if self._hwnd:
-            rect = ctypes.wintypes.RECT()
-            ctypes.windll.user32.GetWindowRect(self._hwnd, ctypes.byref(rect))
-            return {
-                'x': rect.left, 'y': rect.top,
-                'w': rect.right - rect.left, 'h': rect.bottom - rect.top,
-            }
-        return None
+        """Return the actual window rect {x, y, w, h} in physical pixels (or None)."""
+        return plat.get_window_rect(self._hwnd)
 
     def resize_window(self, w, h):
         """Called from JS drag-resize handler."""
@@ -307,16 +240,16 @@ class Api:
             self._window.resize(int(w), int(h))
 
     def move_and_resize(self, x, y, w, h):
-        """Atomic move+resize using SetWindowPos to avoid flicker."""
-        hwnd = getattr(self, '_hwnd', None)
-        if hwnd:
-            SWP_NOZORDER = 0x0004
-            ctypes.windll.user32.SetWindowPos(
-                hwnd, None, int(x), int(y), int(w), int(h), SWP_NOZORDER
-            )
-        elif self._window:
-            self._window.move(int(x), int(y))
-            self._window.resize(int(w), int(h))
+        """Atomic move+resize (SetWindowPos on Windows, pywebview elsewhere)."""
+        plat.move_and_resize(self._hwnd, self._window, x, y, w, h)
+
+    def start_window_move(self, x, y):
+        """Begin a compositor-driven window move (Linux/GTK; no-op elsewhere)."""
+        plat.start_window_move(self._window, x, y)
+
+    def start_window_resize(self, edge, x, y):
+        """Begin a compositor-driven resize from an edge (Linux/GTK; no-op elsewhere)."""
+        plat.start_window_resize(self._window, str(edge), x, y)
 
     # --- Honey Pot ---
 
@@ -348,14 +281,10 @@ class Api:
         return read_honey_pot_messages()
 
     def confirm_and_clear_honey_pot(self):
-        MB_YESNO = 0x04
-        MB_ICONWARNING = 0x30
-        IDYES = 6
-        result = ctypes.windll.user32.MessageBoxW(
-            0, "Clear all honey pot messages? This cannot be undone.",
-            "Clear Honey Pot", MB_YESNO | MB_ICONWARNING
-        )
-        if result != IDYES:
+        if not plat.confirm_dialog(
+            self._window, "Clear Honey Pot",
+            "Clear all honey pot messages? This cannot be undone."
+        ):
             return None
         clear_honey_pot_messages()
         self._update_honey_mtime()
@@ -593,28 +522,18 @@ class Api:
         return self.SETTINGS_DEFAULTS
 
     def set_window_opacity(self, pct):
-        """Set window opacity 50-100% using Win32 SetLayeredWindowAttributes."""
-        pct = max(50, min(100, int(pct)))
-        if not self._hwnd:
-            return
-        user32 = ctypes.windll.user32
-        WS_EX_LAYERED = 0x00080000
-        LWA_ALPHA = 0x02
-        style = user32.GetWindowLongW(self._hwnd, GWL_EXSTYLE)
-        if pct < 100:
-            user32.SetWindowLongW(self._hwnd, GWL_EXSTYLE, style | WS_EX_LAYERED)
-            alpha = int(pct * 255 / 100)
-            user32.SetLayeredWindowAttributes(self._hwnd, 0, alpha, LWA_ALPHA)
-        else:
-            user32.SetWindowLongW(self._hwnd, GWL_EXSTYLE, style & ~WS_EX_LAYERED)
+        """Set window opacity 50-100% (layered window on Windows, GTK elsewhere)."""
+        plat.set_window_opacity(self._hwnd, self._window, pct)
 
     def restart_widget(self):
         """Relaunch widget as a detached process, then close this one."""
         args = [sys.executable, os.path.join(BASE_DIR, 'widget.pyw')]
         if self._persona == 'riya':
             args.append('--for-riya')
-        DETACHED_PROCESS = 0x00000008
-        subprocess.Popen(args, creationflags=DETACHED_PROCESS, close_fds=True)
+        # The relaunched child writes the same PID file; flag so our shutdown
+        # cleanup doesn't delete the child's fresh PID file.
+        self._restarting = True
+        plat.spawn_detached(args, cwd=BASE_DIR)
         if self._window:
             self._window.destroy()
 
@@ -665,46 +584,20 @@ def reminder_loop(api_obj, tray_icon_ref):
                                 pass
 
                         if should_notify:
+                            msg = random.choice(REMINDER_MESSAGES)
                             icon = tray_icon_ref.get('icon')
                             if icon:
-                                msg = random.choice(REMINDER_MESSAGES)
                                 icon.notify(msg, 'Todo Reminder')
+                            else:
+                                # No tray (e.g. Linux without AppIndicator) —
+                                # fall back to a desktop notification.
+                                plat.notify('Todo Reminder', msg)
                             tracker['lastReminderTime'] = now.isoformat()
                             save_tracker(tracker)
         except Exception:
             pass
 
         time.sleep(300)  # poll every 5 minutes
-
-
-def desktop_persist_loop(api_obj, window):
-    """Keep widget visible on the desktop.
-
-    Detects when the window is minimized (e.g. Win+D / Show Desktop)
-    and restores it so it behaves like a desktop sticky note.
-    Other windows can freely cover it.
-    """
-    user32 = ctypes.windll.user32
-    SW_RESTORE = 9
-    time.sleep(2)  # wait for hwnd to be cached
-
-    while True:
-        time.sleep(0.5)
-        hwnd = api_obj._hwnd
-        if not hwnd:
-            continue
-        # Skip if user explicitly minimized to tray
-        if api_obj._honey_pot_mode:
-            continue
-        try:
-            if not user32.IsWindowVisible(hwnd) and not getattr(api_obj, '_tray_hidden', False):
-                # Window was hidden (e.g. Show Desktop) — restore it
-                user32.ShowWindow(hwnd, SW_RESTORE)
-            elif user32.IsIconic(hwnd):
-                # Window was minimized — restore it
-                user32.ShowWindow(hwnd, SW_RESTORE)
-        except Exception:
-            pass
 
 
 def file_watcher(api_obj, window):
@@ -742,6 +635,12 @@ def file_watcher(api_obj, window):
 
 
 def create_tray_icon(persona='ritesh'):
+    """Build the tray-icon image. Requires Pillow; returns None if unavailable."""
+    try:
+        from PIL import Image, ImageDraw
+    except Exception:
+        return None
+
     if persona == 'riya':
         img = Image.new('RGBA', (64, 64), (255, 200, 220, 255))
         draw = ImageDraw.Draw(img)
@@ -821,22 +720,34 @@ def main():
 
     def setup_tray():
         nonlocal tray_icon
-        menu = pystray.Menu(
-            pystray.MenuItem('Show Widget', show_window, default=True),
-            pystray.Menu.SEPARATOR,
-            pystray.MenuItem('Quit', quit_app),
-        )
-        tray_icon = pystray.Icon(
-            f'TodoWidget-{persona}',
-            create_tray_icon(persona),
-            window_title,
-            menu,
-        )
-        tray_ref['icon'] = tray_icon
-        tray_icon.run()
+        try:
+            icon_img = create_tray_icon(persona)
+            if icon_img is None:
+                # Pillow not installed — skip the tray entirely.
+                tray_ref['icon'] = None
+                return
+            menu = pystray.Menu(
+                pystray.MenuItem('Show Widget', show_window, default=True),
+                pystray.Menu.SEPARATOR,
+                pystray.MenuItem('Quit', quit_app),
+            )
+            tray_icon = pystray.Icon(
+                f'TodoWidget-{persona}',
+                icon_img,
+                window_title,
+                menu,
+            )
+            tray_ref['icon'] = tray_icon
+            tray_icon.run()  # blocks; may raise on GNOME/Wayland without AppIndicator
+        except Exception:
+            # No system tray available — the app stays usable; reminders fall
+            # back to plat.notify(). Signal the reminder loop via a None icon.
+            tray_icon = None
+            tray_ref['icon'] = None
 
-    tray_thread = threading.Thread(target=setup_tray, daemon=True)
-    tray_thread.start()
+    if pystray is not None:
+        tray_thread = threading.Thread(target=setup_tray, daemon=True)
+        tray_thread.start()
 
     # Reminder notifications (todo mode only, not honey pot)
     reminder_thread = threading.Thread(
@@ -844,35 +755,22 @@ def main():
     )
     reminder_thread.start()
 
-    # Global hotkey: Alt+T to show/focus the widget
-    def hotkey_listener():
-        user32 = ctypes.windll.user32
-        MOD_ALT = 0x0001
-        VK_T = 0x54
-        HOTKEY_ID = 1
-        WM_HOTKEY = 0x0312
+    # Global "show/focus the widget" trigger:
+    #   Windows  -> Alt+T global hotkey
+    #   Linux/mac -> SIGUSR1 (sent by `todo-cli.sh show` / a GNOME shortcut)
+    def on_show():
+        api_obj._tray_hidden = False
+        window.show()
+        plat.raise_to_foreground(api_obj._hwnd)
 
-        if not user32.RegisterHotKey(None, HOTKEY_ID, MOD_ALT, VK_T):
-            return  # another instance may have registered it
-
-        msg = ctypes.wintypes.MSG()
-        while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) != 0:
-            if msg.message == WM_HOTKEY:
-                api_obj._tray_hidden = False
-                window.show()
-                # Bring to front
-                if api_obj._hwnd:
-                    user32.SetForegroundWindow(api_obj._hwnd)
-
-    hotkey_thread = threading.Thread(target=hotkey_listener, daemon=True)
-    hotkey_thread.start()
+    plat.start_show_listener(on_show)
 
     def on_loaded():
-        # Find and cache the window handle by PID (reliable)
+        # Find and cache the window handle by PID (Windows; None elsewhere)
         time.sleep(0.5)
-        api_obj._hwnd = find_hwnd_by_pid(os.getpid())
-        hide_from_taskbar(api_obj._hwnd)
-        apply_dwm_tweaks(api_obj._hwnd)
+        api_obj._hwnd = plat.find_hwnd_by_pid(os.getpid())
+        plat.hide_from_taskbar(api_obj._hwnd)
+        plat.apply_visual_tweaks(api_obj._hwnd)
 
         # Apply saved settings
         try:
@@ -883,11 +781,9 @@ def main():
         except Exception:
             pass
 
-        # Desktop persistence (restores widget after Win+D / Show Desktop)
-        persist_thread = threading.Thread(
-            target=desktop_persist_loop, args=(api_obj, window), daemon=True
-        )
-        persist_thread.start()
+        # Desktop persistence (restores widget after Win+D / Show Desktop).
+        # Windows-only; a no-op on other platforms.
+        plat.start_desktop_persist(api_obj, window)
 
         # File watcher (always runs - catches local edits)
         watcher = threading.Thread(
@@ -900,14 +796,26 @@ def main():
             api_obj._initial_firebase_sync()
             api_obj._start_firebase_listeners()
 
-    webview.start(on_loaded, debug=False)
+    try:
+        webview.start(on_loaded, debug=False)
+    except Exception as e:
+        sys.stderr.write(
+            "Failed to start the webview GUI backend.\n"
+            "On Linux install the GTK/WebKit backend, e.g.:\n"
+            "  sudo apt install python3-gi gir1.2-webkit2-4.1\n"
+            f"Underlying error: {e}\n"
+        )
+        raise
 
     if tray_icon:
         tray_icon.stop()
-    try:
-        os.remove(pid_file)
-    except OSError:
-        pass
+    # Skip PID cleanup if we're restarting — the relaunched child already
+    # wrote a fresh PID file and we must not delete it.
+    if not api_obj._restarting:
+        try:
+            os.remove(pid_file)
+        except OSError:
+            pass
 
 
 if __name__ == '__main__':

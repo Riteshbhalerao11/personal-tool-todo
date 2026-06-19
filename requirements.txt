@@ -1,4 +1,15 @@
-pywebview>=4.0
-pystray>=0.19
-Pillow>=9.0
+pywebview>=4.2
 requests>=2.28
+
+# Optional: system-tray icon. pystray pulls in Pillow (~6 MB). The widget runs
+# fine without these — reminders fall back to desktop notifications and the
+# window is shown via the SIGUSR1/hotkey listener. Install only if you want the
+# tray icon:  pip install "pystray>=0.19" "Pillow>=9.0"
+
+# Linux note: pywebview's GTK backend and the tray rely on SYSTEM packages, not pip:
+#   sudo apt install python3-gi gir1.2-webkit2-4.1 \
+#                    gir1.2-ayatanaappindicator3-0.1 libnotify-bin
+# install.sh uses uv:  uv venv --system-site-packages .venv
+#                      uv pip install -r requirements.txt
+# The --system-site-packages flag lets the pip packages above see the system
+# PyGObject/WebKit (gi is not pip-installable).

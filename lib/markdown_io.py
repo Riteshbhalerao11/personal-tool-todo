@@ -63,8 +63,11 @@ def get_widget_folder():
     configured = get_configured_folder()
     if configured:
         return configured
-    # 2. Default: local app data
-    return os.path.join(os.environ.get('LOCALAPPDATA', '.'), 'TodoWidget')
+    # 2. Default: per-user app data (platform-specific).
+    #    Windows: %LOCALAPPDATA%\TodoWidget, Linux: ~/.local/share/TodoWidget,
+    #    macOS: ~/Library/Application Support/TodoWidget.
+    from lib.platform_compat import get_app_data_dir
+    return get_app_data_dir()
 
 
 def get_todo_path():
@@ -428,9 +431,20 @@ def set_todo_priority(date, index, priority):
     with _file_lock:
         sections = read_todo_sections()
         for s in sections:
-            if s['date'] == date and 0 <= index < len(s['items']):
-                s['items'][index]['priority'] = priority
-                break
+            if s['date'] != date or not (0 <= index < len(s['items'])):
+                continue
+            items = s['items']
+            item = items[index]
+            item['priority'] = priority
+            item_depth = item.get('depth', 0)
+
+            # Cascade to children: all deeper items immediately following
+            # inherit the parent's priority (mirrors the done cascade).
+            for j in range(index + 1, len(items)):
+                if items[j].get('depth', 0) <= item_depth:
+                    break
+                items[j]['priority'] = priority
+            break
         write_todo_file(sections)
 
 
@@ -482,10 +496,13 @@ def reorder_todo_group(date, from_index, to_index, new_priority=None):
             group = items[from_index:group_end]
             del items[from_index:group_end]
 
-            # Update priority of the root item if crossing groups
+            # Update priority if crossing groups: the root and all its
+            # children inherit the new priority (keeps children matching parent).
             if new_priority is not None:
                 valid = ('none', 'high', 'medium', 'low')
-                group[0]['priority'] = new_priority if new_priority in valid else 'none'
+                p = new_priority if new_priority in valid else 'none'
+                for it in group:
+                    it['priority'] = p
 
             # Adjust to_index after removal
             if to_index > from_index:

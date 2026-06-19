@@ -1,0 +1,12 @@
+[Desktop Entry]
+# Reference template. install.sh generates the real file at
+#   ~/.config/autostart/todo-widget-<persona>.desktop
+# with absolute paths filled in. Placeholders below:
+#   __EXEC__  ->  /abs/path/.venv/bin/python "/abs/path/widget.pyw" [--for-riya]
+Type=Application
+Name=Todo Widget
+Comment=Daily todo sticky-note widget
+Exec=__EXEC__
+X-GNOME-Autostart-enabled=true
+NoDisplay=true
+Terminal=false

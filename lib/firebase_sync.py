@@ -56,7 +56,12 @@ class FirebaseSync:
                             continue
                         event_type = None
                         data_lines = []
-                        for raw_line in resp.iter_lines(chunk_size=1, decode_unicode=True):
+                        # Read line-buffered, not byte-by-byte. chunk_size=1
+                        # spent a Python iteration + decode per byte on a
+                        # long-lived stream; an 8 KB buffer cuts that CPU cost
+                        # with no added latency (recv still returns as soon as
+                        # data arrives, so events are delivered promptly).
+                        for raw_line in resp.iter_lines(chunk_size=8192, decode_unicode=True):
                             if raw_line is None:
                                 continue
                             line = raw_line
@@ -100,6 +105,7 @@ class FirebaseSync:
                     'text': item.get('text', ''),
                     'done': item.get('done', False),
                     'depth': item.get('depth', 0),
+                    'priority': item.get('priority', 'none'),
                 })
             self.write(f"todos/{self.persona}/{date}/items", items)
 
@@ -111,6 +117,7 @@ class FirebaseSync:
                 'text': item.get('text', ''),
                 'done': item.get('done', False),
                 'depth': item.get('depth', 0),
+                'priority': item.get('priority', 'none'),
             })
         self.write(f"todos/{self.persona}/{today_str}/items", clean)
 

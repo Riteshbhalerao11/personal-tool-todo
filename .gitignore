@@ -3,3 +3,4 @@ __pycache__/
 widget-config.json
 .claude/
 widget_err.log
+.venv/
